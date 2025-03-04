@@ -17,29 +17,7 @@ def log(msg):
 
 # MYSQL UTIL FUNCTIONS
 # ------------------------------------------------------------------------------
-def mysql_init(database: str) -> mysql.connector.MySQLConnection:
-    # attempt to connect to MySQL
-    connection = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        port="3306",
-        password="",
-    )
 
-    try:
-        # attempt to connect to the specified database
-        connection.databse = database
-    except mysql.connector.Error as err:
-        # if the database doesn't exist, attempt to create it and connect
-        if err.errno == errorcode.ER_BAD_DB_ERROR:
-            with connection.cursor() as cursor:
-                cursor.execute("CREATE DATABASE %s", (database,))
-                connection.databse = database
-                # TODO: setup database here
-        else:
-            raise err
-
-    return connection
 
 # LASTFM UTIL FUNCTIONS
 # ------------------------------------------------------------------------------
@@ -53,44 +31,72 @@ def lastfm_init() -> pylast.LastFMNetwork:
     return pylast.LastFMNetwork(API_KEY, API_SECRET)
 
 
-def lastfm_user_create(
-    network: pylast.LastFMNetwork, retry_count: int
-) -> tuple[str, str]:
-    skg = pylast.SessionKeyGenerator(network)
+def lastfm_user_create() -> tuple[str, str]:
+    skg = pylast.SessionKeyGenerator(lastfm_network)
     url = skg.get_web_auth_url()
 
-    print(f"Please authorize this script to access your account: {url}\n")
+    print(f"Please authorize this application to access your account: {url}\n")
     webbrowser.open(url)
 
-    while retry_count > 0:
-        retry_count -= 1
+    while True:
         try:
-            return skg.get_web_auth_session_key(url)
+            return skg.get_web_auth_session_key_username(url)
         except pylast.WSError:
-            # sleep to prevent hitting
+            # sleep to prevent hitting rate limits
             time.sleep(1)
 
 
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
-def user_auth(username: str, password: str):
+def user_login(username: str, password: str):
     with mysql_connection.cursor() as cursor:
-        cursor.execute("SELECT @@version")
-        res = cur.fetchone()
+        cursor.execute("SELECT sp_user_authenticate(%s, %s)", (username, password))
+        res = cursor.fetchone()
         print(res[0])
+        return res
+
+
+def user_create():
+    if lastfm_network is None:
+        return None
+
+    session_key, username = lastfm_user_create()
+    password = input("New Password: ")
+
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "CALL sp_user_create(%s, %s, %s)", (username, password, session_key)
+        )
+        mysql_connection.commit()
+        print(username, password, session_key, cursor.fetchone())
+        return username
+
 
 def main():
     # n = setup()
     # x = user_auth(n, 10)
     # print(f"{x}")
-    print(10)
+    # user_create()
+    user_login("emekoi", "password")
+    print("DONE")
+
 
 if __name__ == "__main__":
+    DATABSE_NAME = os.getenv("DATABSE_NAME") or "finalprojectdb"
+
     try:
-        mysql_connection = mysql_init("finalprojectdb")
+        mysql_connection = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            port="3306",
+            password="",
+            database=DATABSE_NAME,
+        )
     except mysql.connector.Error as err:
         if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
             log("Incorrect username or password when connecting to DB")
+        elif err.errno == errorcode.ER_BAD_DB_ERROR:
+            log("Database does not exist")
         else:
             log(f"Failed to connect to DB: {err}")
 
@@ -100,4 +106,5 @@ if __name__ == "__main__":
 
     main()
 
+    mysql_connection.commit()
     mysql_connection.close()
