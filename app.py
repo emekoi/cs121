@@ -7,6 +7,7 @@ import mysql.connector
 import mysql.connector.errorcode as errorcode
 
 import pylast
+import rich.console
 
 
 # GENERAL UTIL FUNCTIONS
@@ -35,25 +36,23 @@ def lastfm_user_create() -> tuple[str, str]:
     skg = pylast.SessionKeyGenerator(lastfm_network)
     url = skg.get_web_auth_url()
 
-    print(f"Please authorize this application to access your account: {url}\n")
     webbrowser.open(url)
 
-    while True:
-        try:
-            return skg.get_web_auth_session_key_username(url)
-        except pylast.WSError:
-            # sleep to prevent hitting rate limits
-            time.sleep(1)
+    with console.status("Authorizing Application..."):
+        while True:
+            try:
+                return skg.get_web_auth_session_key_username(url)
+            except pylast.WSError:
+                # sleep to prevent hitting rate limits
+                time.sleep(1)
 
 
-# MAIN FUNCTIONS
+# USER FUNCTIONS
 # ------------------------------------------------------------------------------
 def user_login(username: str, password: str):
     with mysql_connection.cursor() as cursor:
         cursor.execute("SELECT sp_user_authenticate(%s, %s)", (username, password))
-        res = cursor.fetchone()
-        print(res[0])
-        return res
+        return cursor.fetchone()[0] == 1
 
 
 def user_create():
@@ -61,24 +60,46 @@ def user_create():
         return None
 
     session_key, username = lastfm_user_create()
-    password = input("New Password: ")
+    print(f"Username: {username}")
+    password = input("Password: ")
 
     with mysql_connection.cursor() as cursor:
         cursor.execute(
             "CALL sp_user_create(%s, %s, %s)", (username, password, session_key)
         )
         mysql_connection.commit()
-        print(username, password, session_key, cursor.fetchone())
         return username
 
 
+# MAIN FUNCTIONS
+# ------------------------------------------------------------------------------
+def menu_sign_up(args):
+    username = user_create()
+    log(f"Created user {username}")
+
+
+def menu_login(args):
+    username = input("Username: ")
+    password = input("Password: ")
+    if not user_login(username, password):
+        log("Invalid username or password.")
+    log("Sign in successful.")
+
+
 def main():
-    # n = setup()
-    # x = user_auth(n, 10)
-    # print(f"{x}")
-    # user_create()
-    user_login("emekoi", "password")
-    print("DONE")
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(required=True)
+
+    parser_login = subparsers.add_parser("login")
+    parser_login.set_defaults(func=menu_login)
+
+    parser_sign_up = subparsers.add_parser("sign-up")
+    parser_sign_up.set_defaults(func=menu_sign_up)
+
+    args = parser.parse_args()
+    args.func(args)
 
 
 if __name__ == "__main__":
@@ -103,8 +124,12 @@ if __name__ == "__main__":
         sys.exit(1)
 
     lastfm_network = lastfm_init()
+    console = rich.console.Console()
 
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
 
     mysql_connection.commit()
     mysql_connection.close()
