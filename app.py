@@ -9,6 +9,7 @@ import mysql.connector.errorcode as errorcode
 
 import pylast
 import rich.console
+import rich.progress
 
 
 # GENERAL UTILITIES
@@ -37,13 +38,12 @@ def mysql_user_authenticate(username: str, password: str) -> bool:
 
 # MYSQL UTIL PROCEDURES
 # ------------------------------------------------------------------------------
-def mysql_user_create(username: str, password: str, session_key: str) -> bool:
+def mysql_user_create(username: str, password: str, session_key: str) -> None:
     with mysql_connection.cursor() as cursor:
         cursor.execute(
             "CALL sp_user_create(%s, %s, %s)", (username, password, session_key)
         )
         mysql_connection.commit()
-        return username, session_key
 
 
 def mysql_user_update_session_key(username: str, session_key: str) -> None:
@@ -65,7 +65,7 @@ def lastfm_init() -> pylast.LastFMNetwork:
     return pylast.LastFMNetwork(API_KEY, API_SECRET)
 
 
-def lastfm_user_create(retry_count: int = 5) -> tuple[str, str]:
+def lastfm_user_auth(retry_count: int) -> tuple[str, str]:
     skg = pylast.SessionKeyGenerator(lastfm_network)
     url = skg.get_web_auth_url()
 
@@ -73,8 +73,9 @@ def lastfm_user_create(retry_count: int = 5) -> tuple[str, str]:
 
     with console.status("Authorizing application..."):
         while retry_count > 0:
+            retry_count -= 1
+
             try:
-                retry_count -= 1
                 return skg.get_web_auth_session_key_username(url)
             except pylast.WSError:
                 # sleep to prevent hitting rate limits
@@ -84,13 +85,58 @@ def lastfm_user_create(retry_count: int = 5) -> tuple[str, str]:
     return None
 
 
+def lastfm_user_import(user: pylast.User) -> any:
+    scrobbles_remaining = min(10, user.get_playcount())
+
+    params = user._get_params()
+    params["limit"] = scrobbles_remaining
+
+    with rich.progress.Progress() as progress:
+        task = progress.add_task("Importing...", total=scrobbles_remaining)
+
+        while not progress.finished:
+            for track_node in pylast._collect_nodes(
+                params["limit"],
+                user,
+                user.ws_prefix + ".getRecentTracks",
+                True,
+                params,
+                stream=True,
+            ):
+                # prevent the now playing track from sneaking in
+                if track_node.hasAttribute("nowplaying"):
+                    continue
+
+                track = pylast._extract(track_node, "name")
+                track_mbid = pylast._extract(track_node, "mbid")
+
+                # artist      = pylast._extract(track_node, "artist")
+                artist_mbid = track_node.getElementsByTagName("artist")[0].getAttribute(
+                    "mbid"
+                )
+
+                # album      = pylast._extract(track_node, "album")
+                album_mbid = track_node.getElementsByTagName("album")[0].getAttribute(
+                    "mbid"
+                )
+
+                # timestamp = track_node.getElementsByTagName("date")[0].getAttribute("uts")
+
+                print(track, track_mbid, artist_mbid, album_mbid)
+
+                progress.update(task, advance=1)
+                time.sleep(0.01)
+
+    return None
+
+
 # USER FUNCTIONS
 # ------------------------------------------------------------------------------
-def user_create() -> tuple[str, str]:
+def user_create(retry_count: int = 5) -> pylast.User:
     if lastfm_network is None:
         raise LastFMError
 
-    if (result := lastfm_user_create()) is None:
+    if (result := lastfm_user_auth(retry_count)) is None:
         return None
 
     session_key, username = result
@@ -103,7 +149,11 @@ def user_create() -> tuple[str, str]:
     print(f"Username: {username}")
     password = input("Password: ")
 
-    return mysql_user_create(username, password, session_key)
+    mysql_user_create(username, password, session_key)
+    user = lastfm_network.get_user(username)
+    # lastfm_user_import(user)
+
+    return user
 
 
 def user_login(username: str, password: str) -> bool:
@@ -113,12 +163,11 @@ def user_login(username: str, password: str) -> bool:
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
 def menu_sign_up(args: argparse.Namespace) -> bool:
-    if (result := user_create()) is None:
+    if (user := user_create()) is None:
         log("Failed to create account.")
         return False
 
-    username, session_key = result
-    log(f"Created user {username}")
+    log(f"Created user {user.name}")
     return True
 
 
@@ -130,6 +179,10 @@ def menu_login(args: argparse.Namespace) -> bool:
         return False
 
     log("Sign in successful.")
+
+    user = lastfm_network.get_user(username)
+    lastfm_user_import(user)
+
     return True
 
 
@@ -148,7 +201,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    DATABSE_NAME = os.getenv("DATABSE_NAME")
+    DATABSE_NAME = os.getenv("DATABASE_NAME")
 
     try:
         mysql_connection = mysql.connector.connect(
