@@ -17,6 +17,7 @@ CREATE DATABASE ${DATABASE_NAME};
 USE ${DATABASE_NAME};
 SOURCE sql/setup.sql;
 SOURCE sql/setup-routines.sql;
+SOURCE sql/setup-passwords.sql;
 EOF
     ;;
 *) ;;

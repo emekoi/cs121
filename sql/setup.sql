@@ -14,9 +14,11 @@ DROP TABLE IF EXISTS mbids;
 -- A table of all known MBIDs alsongside their name and frecency.
 CREATE TABLE mbids
     -- INFO: 36 character UUID given by MusicBrainz.
-  ( mbid CHAR(36)
+  ( mbid      CHAR(36)
     -- INFO: UTF-8 encoded name as reported by MusicBrainz.
-  , name VARCHAR(256) NOT NULL
+  , mbid_name VARCHAR(256) NOT NULL
+    -- INFO: The type of the MBID entity.
+  , mbid_type ENUM('artist', 'album', 'track') NOT NULL
     -- INFO: A combined measure of frequency and recency used to find MBIDs that
     -- have not been scrobbled recently while supressing MBIDS that have a high
     -- total number of scrobbles. This is shared across all users.
@@ -92,9 +94,7 @@ CREATE TABLE tracks
 -- A table of all known users
 CREATE TABLE users
     -- INFO: An unique identifier of users.
-  ( user_id   INT           NOT NULL AUTO_INCREMENT
-    -- INFO: An user-facing account name.
-  , user_name VARCHAR(16)   NOT NULL
+  ( user_name VARCHAR(16)   NOT NULL
     -- INFO: The salt used to hash a user's password.
   , user_salt CHAR(8)       NOT NULL
     -- INFO: The salted hash of the user's password.
@@ -103,7 +103,7 @@ CREATE TABLE users
   , user_admin  TINYINT     NOT NULL
     -- INFO: A user's Last.FM session key if it exists.
   , user_session BINARY(32)
-  , PRIMARY KEY (user_id)
+  , PRIMARY KEY (user_name)
   )
 ;
 
@@ -112,19 +112,19 @@ CREATE TABLE scrobbles
     -- INFO: An unique identifier for this listening event.
     -- NOTE: This is necessary since Last.FM only reports minute in precision
     -- and some songs are shorted than 1 minute.
-  ( scrobble_id   INT      NOT NULL AUTO_INCREMENT
+  ( scrobble_id   INT         NOT NULL AUTO_INCREMENT
     -- INFO: The time at which this listening event occured.
-  , scrobble_time DATETIME NOT NULL
+  , scrobble_time DATETIME    NOT NULL
     -- INFO: The track that was listened to.
-  , track_mbid    CHAR(36) NOT NULL
+  , track_mbid    CHAR(36)    NOT NULL
     -- INFO: The user that listened to this track.
-  , user_id       INT      NOT NULL
+  , user_name     VARCHAR(16) NOT NULL
   , PRIMARY KEY (scrobble_id)
   , FOREIGN KEY (track_mbid)
       REFERENCES tracks(track_mbid)
       ON DELETE CASCADE
-  , FOREIGN KEY (user_id)
-      REFERENCES users(user_id)
+  , FOREIGN KEY (user_name)
+      REFERENCES users(user_name)
       ON DELETE CASCADE
   )
 ;

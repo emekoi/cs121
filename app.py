@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import webbrowser
+import argparse
 
 import mysql.connector
 import mysql.connector.errorcode as errorcode
@@ -10,14 +11,46 @@ import pylast
 import rich.console
 
 
-# GENERAL UTIL FUNCTIONS
+# GENERAL UTILITIES
 # ------------------------------------------------------------------------------
-def log(msg):
+class LastFMError(Exception):
+    pass
+
+
+def log(msg) -> None:
     print(msg, file=sys.stderr)
 
 
 # MYSQL UTIL FUNCTIONS
 # ------------------------------------------------------------------------------
+def mysql_user_exists(username: str) -> bool:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("SELECT sf_user_exists(%s)", (username,))
+        return cursor.fetchone()[0] == 1
+
+
+def mysql_user_authenticate(username: str, password: str) -> bool:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("SELECT sf_user_authenticate(%s, %s)", (username, password))
+        return cursor.fetchone()[0] == 1
+
+
+# MYSQL UTIL PROCEDURES
+# ------------------------------------------------------------------------------
+def mysql_user_create(username: str, password: str, session_key: str) -> bool:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "CALL sp_user_create(%s, %s, %s)", (username, password, session_key)
+        )
+        mysql_connection.commit()
+        return username, session_key
+
+
+def mysql_user_update_session_key(username: str, session_key: str) -> None:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "CALL sp_user_update_session_key(%s, %s)", (username, session_key)
+        )
 
 
 # LASTFM UTIL FUNCTIONS
@@ -32,63 +65,75 @@ def lastfm_init() -> pylast.LastFMNetwork:
     return pylast.LastFMNetwork(API_KEY, API_SECRET)
 
 
-def lastfm_user_create() -> tuple[str, str]:
+def lastfm_user_create(retry_count: int = 5) -> tuple[str, str]:
     skg = pylast.SessionKeyGenerator(lastfm_network)
     url = skg.get_web_auth_url()
 
     webbrowser.open(url)
 
-    with console.status("Authorizing Application..."):
-        while True:
+    with console.status("Authorizing application..."):
+        while retry_count > 0:
             try:
+                retry_count -= 1
                 return skg.get_web_auth_session_key_username(url)
             except pylast.WSError:
                 # sleep to prevent hitting rate limits
                 time.sleep(1)
 
+    log("Unable to authorize application.")
+    return None
+
 
 # USER FUNCTIONS
 # ------------------------------------------------------------------------------
-def user_login(username: str, password: str):
-    with mysql_connection.cursor() as cursor:
-        cursor.execute("SELECT sp_user_authenticate(%s, %s)", (username, password))
-        return cursor.fetchone()[0] == 1
-
-
-def user_create():
+def user_create() -> tuple[str, str]:
     if lastfm_network is None:
+        raise LastFMError
+
+    if (result := lastfm_user_create()) is None:
         return None
 
-    session_key, username = lastfm_user_create()
+    session_key, username = result
+
+    if mysql_user_exists(username):
+        mysql_user_update_session_key(username, session_key)
+        log(f"User '{username}' already exists")
+        return None
+
     print(f"Username: {username}")
     password = input("Password: ")
 
-    with mysql_connection.cursor() as cursor:
-        cursor.execute(
-            "CALL sp_user_create(%s, %s, %s)", (username, password, session_key)
-        )
-        mysql_connection.commit()
-        return username
+    return mysql_user_create(username, password, session_key)
+
+
+def user_login(username: str, password: str) -> bool:
+    return mysql_user_authenticate(username, password)
 
 
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
-def menu_sign_up(args):
-    username = user_create()
+def menu_sign_up(args: argparse.Namespace) -> bool:
+    if (result := user_create()) is None:
+        log("Failed to create account.")
+        return False
+
+    username, session_key = result
     log(f"Created user {username}")
+    return True
 
 
-def menu_login(args):
+def menu_login(args: argparse.Namespace) -> bool:
     username = input("Username: ")
     password = input("Password: ")
     if not user_login(username, password):
         log("Invalid username or password.")
+        return False
+
     log("Sign in successful.")
+    return True
 
 
-def main():
-    import argparse
-
+def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(required=True)
 
@@ -103,7 +148,7 @@ def main():
 
 
 if __name__ == "__main__":
-    DATABSE_NAME = os.getenv("DATABSE_NAME") or "finalprojectdb"
+    DATABSE_NAME = os.getenv("DATABSE_NAME")
 
     try:
         mysql_connection = mysql.connector.connect(
@@ -130,6 +175,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
+    except LastFMError:
+        log("Last.FM support disabled.")
 
     mysql_connection.commit()
     mysql_connection.close()
