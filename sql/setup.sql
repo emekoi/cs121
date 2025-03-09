@@ -4,6 +4,7 @@
 -- change so we do not needs any cascading updates.
 
 DROP TABLE IF EXISTS scrobbles;
+DROP TABLE IF EXISTS scores;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tracks;
 DROP TABLE IF EXISTS albums;
@@ -19,10 +20,6 @@ CREATE TABLE mbids
   , mbid_name VARCHAR(256) NOT NULL
     -- INFO: The type of the MBID entity.
   , mbid_type ENUM('artist', 'album', 'track') NOT NULL
-    -- INFO: A combined measure of frequency and recency used to find MBIDs that
-    -- have not been scrobbled recently while supressing MBIDS that have a high
-    -- total number of scrobbles. This is shared across all users.
-  , frecency INT
   , PRIMARY KEY (mbid)
   )
 ;
@@ -94,19 +91,40 @@ CREATE TABLE tracks
 -- A table of all known users
 CREATE TABLE users
     -- INFO: An unique identifier of users.
-  ( user_name VARCHAR(16)   NOT NULL
+  ( user_name    VARCHAR(16) NOT NULL
     -- INFO: The salt used to hash a user's password.
-  , user_salt CHAR(8)       NOT NULL
+  , user_salt    CHAR(8)     NOT NULL
     -- INFO: The salted hash of the user's password.
-  , user_hash BINARY(64)    NOT NULL
+  , user_hash    BINARY(64)  NOT NULL
     -- INFO: A flag determining whether a user is an admin.
-  , user_admin  TINYINT     NOT NULL
+  , user_admin   TINYINT     NOT NULL
     -- INFO: A user's Last.FM session key if it exists.
   , user_session BINARY(32)
   , PRIMARY KEY (user_name)
   )
 ;
 
+-- A table tracking per-user reccomendation scores for MBIDs.
+CREATE TABLE scores
+    -- INFO: The user that scrobbled this track.
+  ( user_name VARCHAR(16) NOT NULL
+    -- INFO: The MDID entity that was scrobbled.
+  , mbid      CHAR(36)    NOT NULL
+    -- INFO: A combined measure of frequency and recency used to find MBIDs that
+    -- have not been scrobbled recently while supressing MBIDS that have a high
+    -- total number of scrobbles.
+  , score     INT
+  , PRIMARY KEY (user_name, mbid)
+  , FOREIGN KEY (mbid)
+      REFERENCES mbids(mbid)
+      ON DELETE CASCADE
+  , FOREIGN KEY (user_name)
+      REFERENCES users(user_name)
+      ON DELETE CASCADE
+  )
+;
+
+-- Does using unique on username add an index.
 -- A table of recorded listening events
 CREATE TABLE scrobbles
     -- INFO: An unique identifier for this listening event.

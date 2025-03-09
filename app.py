@@ -123,9 +123,11 @@ def lastfm_user_import(user: pylast.User) -> any:
                 # timestamp = track_node.getElementsByTagName("date")[0].getAttribute("uts")
 
                 print(track, track_mbid, artist_mbid, album_mbid)
+                # print(track)
 
                 progress.update(task, advance=1)
-                time.sleep(0.01)
+
+            time.sleep(0.01)
 
     return None
 
