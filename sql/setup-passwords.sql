@@ -63,7 +63,7 @@ DELIMITER !
 CREATE FUNCTION sf_user_authenticate(username VARCHAR(16), password VARCHAR(20))
 RETURNS TINYINT DETERMINISTIC
 BEGIN
-  RETURN (SELECT COUNT(*)
+  RETURN (SELECT users.user_admin
   FROM users
   WHERE users.user_name = username
     AND users.user_hash = sf_password_hash(user_salt, password));
