@@ -1,7 +1,7 @@
 -- TODO: documentation
 DELIMITER !
 CREATE PROCEDURE sp_mbid_add
-  ( mbid CHAR(36)
+  ( mbid      CHAR(36)
   , mbid_name VARCHAR(256)
   , mbid_type ENUM('artist', 'album', 'track')
   )
@@ -20,49 +20,52 @@ CREATE PROCEDURE sp_artist_add
 BEGIN
   CALL sp_mbid_add(artist_mbid, artist_name, 'artist');
   INSERT INTO artists VALUES (artist_mbid)
-  ON DUPLICATE KEY UPDATE artist_mbid = artist_mbid;
+  ON DUPLICATE KEY UPDATE mbid = mbid;
 END !
 DELIMITER ;
 
 -- TODO: documentation
 DELIMITER !
 CREATE PROCEDURE sp_album_add
-  ( album_mbid CHAR(36)
-  , album_name VARCHAR(256)
+  ( album_mbid   CHAR(36)
+  , album_name   VARCHAR(256)
   , album_artist CHAR(36)
   )
 BEGIN
   CALL sp_mbid_add(album_mbid, album_name, 'album');
   INSERT INTO albums VALUES (album_mbid, album_artist)
-  ON DUPLICATE KEY UPDATE album_mbid = album_mbid;
+  ON DUPLICATE KEY UPDATE mbid = mbid;
 END !
 DELIMITER ;
 
 -- TODO: documentation
 DELIMITER !
 CREATE PROCEDURE sp_track_add
-  ( track_mbid CHAR(36)
-  , track_name VARCHAR(256)
+  ( track_mbid   CHAR(36)
+  , track_name   VARCHAR(256)
   , track_artist CHAR(36)
-  , track_album CHAR(36)
+  , track_album  CHAR(36)
   , track_length TIME
   )
 BEGIN
   CALL sp_mbid_add(track_mbid, track_name, 'track');
   INSERT INTO tracks VALUES (track_mbid, track_artist, track_album, track_length)
-  ON DUPLICATE KEY UPDATE track_mbid = track_mbid;
+  ON DUPLICATE KEY UPDATE mbid = mbid;
 END !
 DELIMITER ;
 
 -- TODO: documentation
 DELIMITER !
 CREATE PROCEDURE sp_user_add_scrobble
-  ( user_name VARCHAR(16)
+  ( user_name     VARCHAR(16)
   , scrobble_time INT
-  , track_mbid CHAR(36)
+  , track_mbid    CHAR(36)
   )
 BEGIN
   -- TODO: update scores
+  UPDATE users
+     SET user_last_update = GREATEST(user_last_update, scrobble_time)
+  WHERE users.user_name = user_name;
 
   INSERT INTO scrobbles
   VALUES

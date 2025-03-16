@@ -45,6 +45,7 @@ BEGIN
     , sf_password_hash(salt, password)
     , FALSE
     , session_key
+    , 0
     );
 END !
 DELIMITER ;
@@ -77,11 +78,11 @@ CREATE PROCEDURE sp_user_change_password
   , password VARCHAR(20)
   )
 BEGIN
-    DECLARE salt CHAR(8) DEFAULT sf_salt_create(8);
-    UPDATE users
-      SET user_salt = salt,
-          user_hash = sf_password_hash(salt, password)
-    WHERE users.username = username;
+  DECLARE salt CHAR(8) DEFAULT sf_salt_create(8);
+  UPDATE users
+    SET user_salt = salt,
+        user_hash = sf_password_hash(salt, password)
+  WHERE users.user_name = username;
 END !
 DELIMITER ;
 
@@ -92,8 +93,8 @@ CREATE PROCEDURE sp_user_update_session_key
   , session_key BINARY(32)
   )
 BEGIN
-    UPDATE users
-       SET user_session = session_key
-    WHERE users.user_name = username;
+  UPDATE users
+     SET user_session = session_key
+  WHERE users.user_name = username;
 END !
 DELIMITER ;

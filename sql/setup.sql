@@ -40,9 +40,9 @@ CREATE TABLE genres
 -- A restriction of mbids to just artists.
 CREATE TABLE artists
     -- INFO: The MBID assigned to this artist by MusicBrainz.
-  ( artist_mbid CHAR(36)
-  , PRIMARY KEY (artist_mbid)
-  , FOREIGN KEY (artist_mbid)
+  ( mbid CHAR(36)
+  , PRIMARY KEY (mbid)
+  , FOREIGN KEY (mbid)
       REFERENCES mbids(mbid)
       ON DELETE CASCADE
   )
@@ -51,15 +51,15 @@ CREATE TABLE artists
 -- A linking table between artist MBIDs and album MBIDs.
 CREATE TABLE albums
     -- INFO: The MBID assigned to this album by MusicBrainz.
-  ( album_mbid CHAR(36)
+  ( mbid   CHAR(36)
     -- INFO: The MBID assigned to this album's artist by MusicBrainz.
-  , artist_mbid CHAR(36)
-  , PRIMARY KEY (album_mbid, artist_mbid)
-  , FOREIGN KEY (album_mbid)
+  , artist CHAR(36)
+  , PRIMARY KEY (mbid, artist)
+  , FOREIGN KEY (mbid)
       REFERENCES mbids(mbid)
       ON DELETE CASCADE
-  , FOREIGN KEY (artist_mbid)
-      REFERENCES artists(artist_mbid)
+  , FOREIGN KEY (artist)
+      REFERENCES artists(mbid)
       ON DELETE CASCADE
   )
 ;
@@ -68,22 +68,22 @@ CREATE TABLE albums
 -- are also recorded when they exist.
 CREATE TABLE tracks
     -- INFO: The MBID assigned to this track by MusicBrainz.
-  ( track_mbid   CHAR(36)
+  ( mbid    CHAR(36)
     -- INFO: The MBID assigned to this track's artist by MusicBrainz.
-  , artist_mbid  CHAR(36)
+  , artist  CHAR(36)
     -- INFO: The MBID assigned to this track's album by MusicBrainz.
     -- NOTE: May be NULL for songs not released on an album/EP.
-  , album_mbid   CHAR(36)
-  , track_length TIME     NOT NULL
-  , PRIMARY KEY (track_mbid, artist_mbid)
-  , FOREIGN KEY (track_mbid)
+  , album   CHAR(36)
+  , length  TIME     NOT NULL
+  , PRIMARY KEY (mbid, artist)
+  , FOREIGN KEY (mbid)
       REFERENCES mbids(mbid)
       ON DELETE CASCADE
-  , FOREIGN KEY (album_mbid)
-      REFERENCES albums(album_mbid)
+  , FOREIGN KEY (album)
+      REFERENCES albums(mbid)
       ON DELETE CASCADE
-  , FOREIGN KEY (artist_mbid)
-      REFERENCES artists(artist_mbid)
+  , FOREIGN KEY (artist)
+      REFERENCES artists(mbid)
       ON DELETE CASCADE
   )
 ;
@@ -91,15 +91,18 @@ CREATE TABLE tracks
 -- A table of all known users
 CREATE TABLE users
     -- INFO: An unique identifier of users.
-  ( user_name    VARCHAR(16) NOT NULL
+  ( user_name        VARCHAR(16) NOT NULL
     -- INFO: The salt used to hash a user's password.
-  , user_salt    CHAR(8)     NOT NULL
+  , user_salt        CHAR(8)     NOT NULL
     -- INFO: The salted hash of the user's password.
-  , user_hash    BINARY(64)  NOT NULL
+  , user_hash        BINARY(64)  NOT NULL
     -- INFO: A flag determining whether a user is an admin.
-  , user_admin   TINYINT     NOT NULL
+  , user_admin       TINYINT     NOT NULL
     -- INFO: A user's Last.FM session key if it exists.
-  , user_session BINARY(32)
+  , user_session     BINARY(32)
+    -- INFO: A UNIX timestamp representing the time a user's scrobbles were
+    -- updated.
+  , user_last_update INT
   , PRIMARY KEY (user_name)
   )
 ;
@@ -132,16 +135,16 @@ CREATE TABLE scrobbles
     -- and some songs are shorted than 1 minute.
   ( scrobble_id   INT         NOT NULL AUTO_INCREMENT
     -- INFO: The time at which this listening event occured.
-    -- NOTE: This is stored as a Unix timestamp and clients are expected to use
+    -- NOTE: This is stored as a UNIX timestamp and clients are expected to use
     -- FROM_UNIXTIME in order to display the timestamp to users.
   , scrobble_time INT         NOT NULL
     -- INFO: The track that was listened to.
-  , track_mbid    CHAR(36)    NOT NULL
+  , mbid          CHAR(36)    NOT NULL
     -- INFO: The user that listened to this track.
   , user_name     VARCHAR(16) NOT NULL
   , PRIMARY KEY (scrobble_id)
-  , FOREIGN KEY (track_mbid)
-      REFERENCES tracks(track_mbid)
+  , FOREIGN KEY (mbid)
+      REFERENCES tracks(mbid)
       ON DELETE CASCADE
   , FOREIGN KEY (user_name)
       REFERENCES users(user_name)

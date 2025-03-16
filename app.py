@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import NamedTuple
 from typing import Self
-from collections.abc import Generator
+# from collections.abc import Generator
 import getpass
 
 import os
@@ -60,6 +60,22 @@ def mysql_user_authenticate(username: str, password: str) -> bool | None:
             return result == 1
 
 
+def mysql_user_last_update(username: str) -> int:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT user_last_update FROM users WHERE user_name = %s", (username,)
+        )
+        return cursor.fetchone()[0]
+
+
+def mysql_user_scrobble_count(username: str) -> int:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT COUNT(*) FROM scrobbles WHERE user_name = %s", (username,)
+        )
+        return cursor.fetchone()[0]
+
+
 # MYSQL UTIL PROCEDURES
 # ------------------------------------------------------------------------------
 def mysql_user_create(username: str, password: str, session_key: str) -> None:
@@ -75,6 +91,30 @@ def mysql_user_update_session_key(username: str, session_key: str) -> None:
         cursor.execute(
             "CALL sp_user_update_session_key(%s, %s)", (username, session_key)
         )
+
+
+def mysql_artist_add(mbid: str, name: str) -> None:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("CALL sp_artist_add(%s, %s)", (mbid, name))
+
+
+def mysql_album_add(mbid: str, name: str, artist: str) -> None:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute("CALL sp_album_add(%s, %s, %s)", (mbid, name, artist))
+
+
+def mysql_track_add(
+    mbid: str, name: str, artist: str, album: str | None, length: datetime.timedelta
+) -> None:
+    with mysql_connection.cursor() as cursor:
+        try:
+            cursor.execute(
+                "CALL sp_track_add(%s, %s, %s, %s, %s)",
+                (mbid, name, artist, album, length),
+            )
+        except:
+            print(f"'{album is None}'", "XXXXXXX", cursor.statement)
+            raise
 
 
 # LASTFM UTIL FUNCTIONS
@@ -116,10 +156,25 @@ def lastfm_user_auth(retry_count: int) -> tuple[str, str] | None:
 
 
 def lastfm_user_import(user: pylast.User) -> any:
-    scrobbles_remaining = min(10, user.get_playcount())
+    username = user.get_name()
+
+    last_scrobble_count = mysql_user_scrobble_count(username)
+    scrobble_count = user.get_playcount()
+
+    if last_scrobble_count >= scrobble_count:
+        return None
+
+    scrobbles_remaining = min(50, scrobble_count - last_scrobble_count)
 
     params = user._get_params()
     params["limit"] = scrobbles_remaining
+    params["from"] = mysql_user_last_update(username)
+
+    def validate_mbid(mbid: str) -> bool:
+        if mbid and len(mbid) == 36:
+            return mbid
+        else:
+            return None
 
     with rich.progress.Progress() as progress:
         task = progress.add_task("Importing...", total=scrobbles_remaining)
@@ -135,26 +190,54 @@ def lastfm_user_import(user: pylast.User) -> any:
             ):
                 # prevent the now playing track from sneaking in
                 if track_node.hasAttribute("nowplaying"):
+                    progress.update(task, advance=1)
                     continue
 
                 artist = pylast._extract(track_node, "artist")
-                artist_mbid = track_node.getElementsByTagName("artist")[0].getAttribute(
-                    "mbid"
+                artist_mbid = validate_mbid(
+                    track_node.getElementsByTagName("artist")[0].getAttribute("mbid")
                 )
+
+                if artist_mbid is None:
+                    progress.update(task, advance=1)
+                    continue
+
+                mysql_artist_add(artist_mbid, artist)
 
                 album = pylast._extract(track_node, "album")
-                album_mbid = track_node.getElementsByTagName("album")[0].getAttribute(
-                    "mbid"
+                album_mbid = validate_mbid(
+                    track_node.getElementsByTagName("album")[0].getAttribute("mbid")
                 )
 
+                if album_mbid is not None:
+                    mysql_album_add(album_mbid, album, artist_mbid)
+
                 track = pylast._extract(track_node, "name")
-                track_mbid = pylast._extract(track_node, "mbid")
+                track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
+
+                if track_mbid is None:
+                    progress.update(task, advance=1)
+                    continue
+
+                # NOTE: ideally we would just use MBIDs here, but since
+                # Last.FM's API is broken and using MBIDs doesn't work 99% of
+                # the time here we are.
+                info_doc = pylast._Request(
+                    lastfm_network(),
+                    "track.getInfo",
+                    {"artist": artist, "track": track},
+                ).execute(False)
+                maybe_duration = pylast._extract(info_doc, "duration")
+                seconds = maybe_duration and (int(maybe_duration) // 1000)
+                duration = datetime.timedelta(seconds=seconds)
+
+                mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
 
                 timestamp = track_node.getElementsByTagName("date")[0].getAttribute(
                     "uts"
                 )
 
-                print(track, track_mbid, artist_mbid, album_mbid)
+                # print(track, artist, album, timestamp, duration)
                 # print(track)
 
                 progress.update(task, advance=1)
@@ -187,7 +270,7 @@ class Album(MBEntry):
 class Track(MBEntry):
     album: Album | None
     artist: Artist
-    length: datetime.time
+    length: datetime.timedelta
 
 
 class User(NamedTuple):
@@ -245,6 +328,9 @@ def menu_sign_up(args: argparse.Namespace) -> bool:
         return False
 
     log(f"Created user {user.name}")
+
+    lastfm_user_import(user.lastfm())
+
     return True
 
 
@@ -259,7 +345,7 @@ def menu_login(args: argparse.Namespace) -> bool:
 
     log("Sign in successful.")
 
-    # lastfm_user_import(user.lastfm())
+    lastfm_user_import(user.lastfm())
 
     return True
 
@@ -306,6 +392,8 @@ if __name__ == "__main__":
         pass
     except LastFMError:
         log("Last.FM support disabled.")
+    except mysql.connector.Error:
+        log("TODO")
 
     mysql_connection.commit()
     mysql_connection.close()
