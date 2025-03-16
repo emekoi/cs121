@@ -63,10 +63,6 @@ CREATE PROCEDURE sp_user_add_scrobble
   )
 BEGIN
   -- TODO: update scores
-  UPDATE users
-     SET user_last_update = GREATEST(user_last_update, scrobble_time)
-  WHERE users.user_name = user_name;
-
   INSERT INTO scrobbles
   VALUES
     ( DEFAULT

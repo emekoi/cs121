@@ -19,6 +19,7 @@ SOURCE sql/setup.sql;
 SOURCE sql/setup-routines.sql;
 SOURCE sql/setup-passwords.sql;
 EOF
+    python app.py sign-up
     ;;
 *) ;;
 esac

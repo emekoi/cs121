@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import NamedTuple
 from typing import Self
+
 # from collections.abc import Generator
 import getpass
 
@@ -107,14 +108,18 @@ def mysql_track_add(
     mbid: str, name: str, artist: str, album: str | None, length: datetime.timedelta
 ) -> None:
     with mysql_connection.cursor() as cursor:
-        try:
-            cursor.execute(
-                "CALL sp_track_add(%s, %s, %s, %s, %s)",
-                (mbid, name, artist, album, length),
-            )
-        except:
-            print(f"'{album is None}'", "XXXXXXX", cursor.statement)
-            raise
+        cursor.execute(
+            "CALL sp_track_add(%s, %s, %s, %s, %s)",
+            (mbid, name, artist, album, length),
+        )
+
+
+def mysql_scrobble_add(username: str, time: int, track: str) -> None:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "CALL sp_user_add_scrobble(%s, %s, %s)",
+            (username, time, track),
+        )
 
 
 # LASTFM UTIL FUNCTIONS
@@ -158,17 +163,17 @@ def lastfm_user_auth(retry_count: int) -> tuple[str, str] | None:
 def lastfm_user_import(user: pylast.User) -> any:
     username = user.get_name()
 
-    last_scrobble_count = mysql_user_scrobble_count(username)
-    scrobble_count = user.get_playcount()
+    prev_scrobble_count = mysql_user_scrobble_count(username)
+    curr_scrobble_count = user.get_playcount()
 
-    if last_scrobble_count >= scrobble_count:
+    if prev_scrobble_count >= curr_scrobble_count:
         return None
 
-    scrobbles_remaining = min(50, scrobble_count - last_scrobble_count)
+    scrobbles_remaining = min(50, curr_scrobble_count - prev_scrobble_count)
 
     params = user._get_params()
     params["limit"] = scrobbles_remaining
-    params["from"] = mysql_user_last_update(username)
+    params["from"] = mysql_user_last_update(username) + 1
 
     def validate_mbid(mbid: str) -> bool:
         if mbid and len(mbid) == 36:
@@ -178,6 +183,7 @@ def lastfm_user_import(user: pylast.User) -> any:
 
     with rich.progress.Progress() as progress:
         task = progress.add_task("Importing...", total=scrobbles_remaining)
+        tracks_seen = 0
 
         while not progress.finished:
             for track_node in pylast._collect_nodes(
@@ -190,8 +196,26 @@ def lastfm_user_import(user: pylast.User) -> any:
             ):
                 # prevent the now playing track from sneaking in
                 if track_node.hasAttribute("nowplaying"):
-                    progress.update(task, advance=1)
+                    progress.advance(task, advance=1)
                     continue
+
+                scrobbles_remaining -= 1
+                tracks_seen += 1
+
+                timestamp = track_node.getElementsByTagName("date")[0].getAttribute(
+                    "uts"
+                )
+                timestamp = timestamp and int(timestamp)
+
+                with mysql_connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE users\n"
+                        "SET user_last_update = GREATEST(user_last_update, %s)\n"
+                        "WHERE users.user_name = %s",
+                        (timestamp, username),
+                    )
+
+                params["from"] = max(params["from"], timestamp + 1)
 
                 artist = pylast._extract(track_node, "artist")
                 artist_mbid = validate_mbid(
@@ -199,7 +223,7 @@ def lastfm_user_import(user: pylast.User) -> any:
                 )
 
                 if artist_mbid is None:
-                    progress.update(task, advance=1)
+                    progress.advance(task, advance=1)
                     continue
 
                 mysql_artist_add(artist_mbid, artist)
@@ -216,33 +240,33 @@ def lastfm_user_import(user: pylast.User) -> any:
                 track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
 
                 if track_mbid is None:
-                    progress.update(task, advance=1)
+                    progress.advance(task, advance=1)
                     continue
 
                 # NOTE: ideally we would just use MBIDs here, but since
                 # Last.FM's API is broken and using MBIDs doesn't work 99% of
                 # the time here we are.
-                info_doc = pylast._Request(
-                    lastfm_network(),
-                    "track.getInfo",
-                    {"artist": artist, "track": track},
-                ).execute(False)
-                maybe_duration = pylast._extract(info_doc, "duration")
-                seconds = maybe_duration and (int(maybe_duration) // 1000)
-                duration = datetime.timedelta(seconds=seconds)
+                duration = pylast._extract(
+                    pylast._Request(
+                        lastfm_network(),
+                        "track.getInfo",
+                        {"artist": artist, "track": track},
+                    ).execute(False),
+                    "duration",
+                )
+                duration = duration and (int(duration) // 1000)
+                duration = datetime.timedelta(seconds=duration)
 
                 mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
 
-                timestamp = track_node.getElementsByTagName("date")[0].getAttribute(
-                    "uts"
-                )
+                mysql_scrobble_add(username, timestamp, track_mbid)
 
-                # print(track, artist, album, timestamp, duration)
-                # print(track)
+                progress.advance(task, advance=1)
 
-                progress.update(task, advance=1)
-
-            time.sleep(0.01)
+            if tracks_seen > 0:
+                time.sleep(0.01)
+            else:
+                progress.advance(task, advance=scrobbles_remaining)
 
     return None
 
