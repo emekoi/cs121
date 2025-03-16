@@ -69,11 +69,11 @@ CREATE TABLE albums
 CREATE TABLE tracks
     -- INFO: The MBID assigned to this track by MusicBrainz.
   ( track_mbid   CHAR(36)
+    -- INFO: The MBID assigned to this track's artist by MusicBrainz.
+  , artist_mbid  CHAR(36)
     -- INFO: The MBID assigned to this track's album by MusicBrainz.
     -- NOTE: May be NULL for songs not released on an album/EP.
   , album_mbid   CHAR(36)
-    -- INFO: The MBID assigned to this track's artist by MusicBrainz.
-  , artist_mbid  CHAR(36)
   , track_length TIME     NOT NULL
   , PRIMARY KEY (track_mbid, artist_mbid)
   , FOREIGN KEY (track_mbid)
@@ -132,7 +132,9 @@ CREATE TABLE scrobbles
     -- and some songs are shorted than 1 minute.
   ( scrobble_id   INT         NOT NULL AUTO_INCREMENT
     -- INFO: The time at which this listening event occured.
-  , scrobble_time DATETIME    NOT NULL
+    -- NOTE: This is stored as a Unix timestamp and clients are expected to use
+    -- FROM_UNIXTIME in order to display the timestamp to users.
+  , scrobble_time INT         NOT NULL
     -- INFO: The track that was listened to.
   , track_mbid    CHAR(36)    NOT NULL
     -- INFO: The user that listened to this track.
