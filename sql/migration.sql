@@ -1,23 +1,34 @@
-DROP TABLE IF EXISTS scores;
+-- SELECT user_name, scrobble_time, mbid, artist, album
+-- FROM scrobbles NATURAL JOIN tracks;
 
--- A table tracking per-user reccomendation scores for MBIDs.
-CREATE TABLE scores
-    -- INFO: The user that scrobbled this track.
-  ( user_name   VARCHAR(16) NOT NULL
-    -- INFO: The MDID entity that was scrobbled.
-  , mbid        CHAR(36)    NOT NULL
-    -- INFO: The UNIX timestamp of the last time this entry was scrobbled.
-  , last_access INT         NOT NULL
-    -- INFO: A combined measure of frequency and recency used to find MBIDs that
-    -- have not been scrobbled recently while supressing MBIDS that have a high
-    -- total number of scrobbles.
-  , last_crf    DOUBLE      NOT NULL
-  , PRIMARY KEY (user_name, mbid)
-  , FOREIGN KEY (mbid)
-      REFERENCES mbids(mbid)
-      ON DELETE CASCADE
-  , FOREIGN KEY (user_name)
-      REFERENCES users(user_name)
-      ON DELETE CASCADE
-  )
-;
+-- SELECT user_name, scrobble_time, mbid, artist, album
+-- FROM scrobbles NATURAL JOIN tracks;
+
+-- SELECT user_name, scrobble_time, mbid, artist, album
+-- FROM scrobbles NATURAL JOIN tracks;
+
+-- START TRANSACTION;
+
+-- SELECT CALL sp_score_update(user_name, scrobble_time, mbid)
+-- FROM scrobbles;
+
+-- SELECT artist, sf_score_F(scrobble_time)
+-- FROM scrobbles NATURAL JOIN tracks;
+
+-- SELECT album, sf_score_F(scrobble_time)
+-- FROM scrobbles NATURAL JOIN tracks WHERE album IS NOT NULL;
+
+-- ROLLBACK;
+
+-- SELECT * FROM scrobbles;
+-- SELECT * FROM scrobbles;
+
+-- SELECT mbid_name AS track_name, artist_name
+-- FROM tracks NATURAL JOIN mbids NATURAL JOIN ();
+
+SELECT mbid_name AS track_name, artist_name
+FROM tracks
+  NATURAL JOIN mbids
+  NATURAL JOIN
+    ( SELECT mbid AS artist, mbid_name AS artist_name
+      FROM (artists NATURAL JOIN mbids)) AS ARTIST;

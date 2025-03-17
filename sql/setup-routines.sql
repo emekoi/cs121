@@ -113,7 +113,7 @@ CREATE PROCEDURE sp_score_update
 BEGIN
   INSERT INTO scores VALUES (user_name, mbid, curr_access, sf_score_F(0))
   ON DUPLICATE KEY UPDATE
-    last_crf = sf_score_C(curr_access - last_access),
+    last_crf = sf_score_C(curr_access - last_access, last_crf),
     last_access = curr_access;
 END !
 DELIMITER ;

@@ -269,11 +269,11 @@ def lastfm_user_import(user: pylast.User) -> int | None:
             duration = pylast.cleanup_nodes(duration)
             duration = pylast._extract(duration, "duration")
             duration = duration and (int(duration) // 1000)
-            duration = datetime.timedelta(seconds=duration)
 
-            mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
-
-            mysql_scrobble_add(username, timestamp, track_mbid)
+            if duration != 0:
+                duration = datetime.timedelta(seconds=duration)
+                mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
+                mysql_scrobble_add(username, timestamp, track_mbid)
 
             advance()
 
@@ -396,11 +396,33 @@ def menu_login() -> bool:
 
     return True
 
+
 def menu_info(args: argparse.Namespace) -> bool:
     if not menu_login():
         return False
 
     return True
+
+
+def migration(args: argparse.Namespace) -> bool:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            """
+SELECT user_name, mbid, artist, album, scrobble_time
+FROM scrobbles
+  NATURAL JOIN tracks
+"""
+        )
+        x = cursor.fetchall()
+        for user_name, track, artist, album, time in x:
+            print(track, artist, album, time)
+            cursor.execute("CALL sp_score_update(%s, %s, %s)", (user_name, time, track))
+            cursor.execute("CALL sp_score_update(%s, %s, %s)", (user_name, time, artist))
+            if album is not None:
+                cursor.execute("CALL sp_score_update(%s, %s, %s)", (user_name, time, album))
+
+
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -411,6 +433,9 @@ def main() -> None:
 
     parser_login = subparsers.add_parser("info")
     parser_login.set_defaults(func=menu_info)
+
+    parser_login = subparsers.add_parser("migration")
+    parser_login.set_defaults(func=migration)
 
     args = parser.parse_args()
     args.func(args)
@@ -444,8 +469,8 @@ if __name__ == "__main__":
         pass
     except LastFMError:
         log("Last.FM support disabled.")
-    except mysql.connector.Error:
-        log("TODO")
+    except mysql.connector.Error as err:
+        log(f"{err}")
 
     mysql_connection.commit()
     mysql_connection.close()
