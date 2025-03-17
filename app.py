@@ -1,24 +1,28 @@
 from __future__ import annotations
+
+from collections.abc import Generator
+from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.widgets import DataTable, Header, Footer
 from typing import NamedTuple
 from typing import Self
 
-# from collections.abc import Generator
-import getpass
-
+import argparse
+import datetime
 import os
 import sys
 import time
 import webbrowser
-import argparse
-import datetime
 
 import mysql.connector
 import mysql.connector.errorcode as errorcode
 
-import pyparsing as pp
 import pylast
+import pyparsing as pp
 import rich.console
 import rich.progress
+import rich.prompt
 
 
 # GLOBAL VARIABLES
@@ -40,10 +44,6 @@ def log(msg) -> None:
     print(msg, file=sys.stderr)
 
 
-def input_password(prompt: str) -> str:
-    return getpass.getpass(prompt) if False else input(prompt)
-
-
 # command query +x:arg1,arg2,arg3
 def parse_user_command(input_str: str) -> any:
     arg = pp.Word(pp.alphas) | pp.quoted_string.set_parse_action(pp.remove_quotes)
@@ -60,9 +60,10 @@ def parse_user_command(input_str: str) -> any:
     parser = command + (query & flags)
 
     try:
-        return parser.parse_string(example).as_dict()
-    except:
+        return parser.parse_string(input_str).as_dict()
+    except pp.ParseException:
         return None
+
 
 # MYSQL UTIL FUNCTIONS
 # ------------------------------------------------------------------------------
@@ -351,6 +352,18 @@ class Track(MBEntry):
     length: datetime.timedelta
 
 
+class Score(NamedTuple):
+    user: User
+    entry: MBEntry
+    score: float
+
+
+class Scrobble(NamedTuple):
+    time: datetime.datetime
+    track: Track
+    user: User
+
+
 class User(NamedTuple):
     name: str
     admin: bool = False
@@ -368,7 +381,7 @@ class User(NamedTuple):
             return None
 
         print(f"Username: {username}")
-        password = input_password("Password: ")
+        password = rich.prompt.Prompt.ask("Password", password=True)
 
         mysql_user_create(username, password, session_key)
 
@@ -385,17 +398,17 @@ class User(NamedTuple):
     def lastfm(self: Self) -> pylast.User:
         return lastfm_network().get_user(self.name)
 
-
-class Score(NamedTuple):
-    user: User
-    entry: MBEntry
-    score: int
-
-
-class Scrobble(NamedTuple):
-    time: datetime.datetime
-    track: Track
-    user: User
+    def scrobbles(self: Self) -> Generator[Scrobble]:
+        with mysql_connection.cursor() as cursor:
+            cursor.execute(
+                """
+              SELECT scrobble_id, scrobble_time, mbid FROM scrobbles NATURAL JOIN tracks
+              WHERE user_name = %s
+              """,
+                (self.name,),
+            )
+            for x in cursor:
+                yield x
 
 
 # MAIN FUNCTIONS
@@ -414,8 +427,8 @@ def menu_sign_up(args: argparse.Namespace) -> bool:
 
 
 def menu_login() -> bool:
-    username = input("Username: ")
-    password = input_password("Password: ")
+    username = rich.prompt.Prompt.ask("Username")
+    password = rich.prompt.Prompt.ask("Password", password=False)
     user = User.login(username, password)
 
     if user is None:
@@ -433,6 +446,54 @@ def menu_login() -> bool:
 def menu_info(args: argparse.Namespace) -> bool:
     if not menu_login():
         return False
+
+    ROWS = [
+        ("lane", "swimmer", "country", "time"),
+        (4  , "Joseph Schooling", Text("Singapore", justify="right"), 50.39),
+        (2  , "Michael Phelps"  , "United States", 51.14),
+        (5  , "Chad le Clos"    , "South Africa", 51.14),
+        (6  , "László Cseh"     , "Hungary", 51.14),
+        (3  , "Li Zhuhao"       , "China", 51.26),
+        (8  , "Mehdy Metella"   , "France", 51.58),
+        (7  , "Tom Shields"      , "United States", 51.73),
+        (1  , "Aleksandr Sadovnikov", "Russia", 51.84),
+        (10 , "Darren Burns", "Scotland", 51.84),
+    ]
+
+    class TableApp(App):
+        BINDINGS = [
+            Binding("ctrl+q", "quit", "Quit", show=True, priority=True)
+        ]
+
+        CSS = """
+    Screen {
+        align: center middle;
+    }
+
+    DataTable {
+        width: 100%;
+    }
+
+    """
+
+        ENABLE_COMMAND_PALETTE = False
+
+        name = "Scrobble Browser"
+
+        def compose(self) -> ComposeResult:
+            yield Header()
+            yield DataTable()
+            yield Footer()
+
+        def on_mount(self) -> None:
+            table = self.query_one(DataTable)
+            table.cursor_type = "row"
+            table.zebra_stripes = True
+            table.add_columns(*ROWS[0])
+            table.add_rows(ROWS[1:])
+
+    app = TableApp()
+    app.run()
 
     return True
 
