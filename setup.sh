@@ -3,8 +3,9 @@
 if [ $# -eq 0 ]; then
     cat <<EOF
 ${0}
-- init: set up a database called ${DATABASE_NAME}
-- demo: load demo data into ${DATABASE_NAME}
+- init    : set up a database called ${DATABASE_NAME}
+- backup  : backup ${DATABASE_NAME}
+- restore : restore ${DATABASE_NAME}
 EOF
     exit 1
 fi
@@ -20,6 +21,14 @@ SOURCE sql/setup-routines.sql;
 SOURCE sql/setup-passwords.sql;
 EOF
     python app.py sign-up
+    ;;
+backup)
+    mkdir -p backup
+    suffix="$(date '+%Y%m%d-%H%M%S' | tr -d '\n')"
+    mysqldump -u root --databases "${DATABASE_NAME}" >"backup/backup-${suffix}.sql"
+    ;;
+restore)
+    mysql -u root <"$2"
     ;;
 *) ;;
 esac
