@@ -15,6 +15,7 @@ import datetime
 import mysql.connector
 import mysql.connector.errorcode as errorcode
 
+import pyparsing as pp
 import pylast
 import rich.console
 import rich.progress
@@ -42,6 +43,26 @@ def log(msg) -> None:
 def input_password(prompt: str) -> str:
     return getpass.getpass(prompt) if False else input(prompt)
 
+
+# command query +x:arg1,arg2,arg3
+def parse_user_command(input_str: str) -> any:
+    arg = pp.Word(pp.alphas) | pp.quoted_string.set_parse_action(pp.remove_quotes)
+    flag_name = pp.Regex("\\+(\\w+):", as_group_list=True).set_parse_action(
+        lambda x: x[0][0]
+    )
+    flag_args = pp.delimited_list(arg, ",")
+    flag = pp.Group(flag_name + flag_args).set_parse_action(
+        lambda xs: [{"name": x[0], "args": x[1:]} for x in xs]
+    )
+    command = pp.Word(pp.alphas).set_results_name("command")
+    query = arg.set_results_name("query")
+    flags = pp.ZeroOrMore(flag).set_results_name("flags", list_all_matches=True)
+    parser = command + (query & flags)
+
+    try:
+        return parser.parse_string(example).as_dict()
+    except:
+        return None
 
 # MYSQL UTIL FUNCTIONS
 # ------------------------------------------------------------------------------
