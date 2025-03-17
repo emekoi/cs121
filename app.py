@@ -166,7 +166,7 @@ def lastfm_user_auth(retry_count: int) -> tuple[str, str] | None:
     return None
 
 
-def lastfm_user_import(user: pylast.User) -> any:
+def lastfm_user_import(user: pylast.User) -> int | None:
     username = user.get_name()
 
     prev_scrobble_count = mysql_user_scrobble_count(username)
@@ -175,7 +175,7 @@ def lastfm_user_import(user: pylast.User) -> any:
     last_scrobble = mysql_user_last_update(username)
 
     if prev_scrobble_count >= curr_scrobble_count:
-        return None
+        return 0
 
     scrobbles_remaining = curr_scrobble_count - prev_scrobble_count
     # scrobbles_remaining = min(50, scrobbles_remaining)
@@ -190,7 +190,7 @@ def lastfm_user_import(user: pylast.User) -> any:
         else:
             return None
 
-    with rich.progress.Progress() as progress:
+    with rich.progress.Progress(transient=True) as progress:
         task = progress.add_task("Importing...", total=scrobbles_remaining)
         tracks_seen = 0
 
@@ -289,7 +289,7 @@ def lastfm_user_import(user: pylast.User) -> any:
         )
     mysql_connection.commit()
 
-    return None
+    return tracks_seen
 
 
 # SCHEMA TYPES
@@ -374,12 +374,13 @@ def menu_sign_up(args: argparse.Namespace) -> bool:
 
     log(f"Created user {user.name}")
 
-    lastfm_user_import(user.lastfm())
+    count = lastfm_user_import(user.lastfm())
+    print(f"Processed {count} scrobbles.")
 
     return True
 
 
-def menu_login(args: argparse.Namespace) -> bool:
+def menu_login() -> bool:
     username = input("Username: ")
     password = input_password("Password: ")
     user = User.login(username, password)
@@ -390,20 +391,26 @@ def menu_login(args: argparse.Namespace) -> bool:
 
     log("Sign in successful.")
 
-    lastfm_user_import(user.lastfm())
+    count = lastfm_user_import(user.lastfm())
+    print(f"Processed {count} scrobbles.")
 
     return True
 
+def menu_info(args: argparse.Namespace) -> bool:
+    if not menu_login():
+        return False
+
+    return True
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(required=True)
 
-    parser_login = subparsers.add_parser("login")
-    parser_login.set_defaults(func=menu_login)
-
     parser_sign_up = subparsers.add_parser("sign-up")
     parser_sign_up.set_defaults(func=menu_sign_up)
+
+    parser_login = subparsers.add_parser("info")
+    parser_login.set_defaults(func=menu_info)
 
     args = parser.parse_args()
     args.func(args)
