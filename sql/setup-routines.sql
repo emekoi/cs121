@@ -1,8 +1,12 @@
+DROP FUNCTION IF EXISTS sf_score_F;
+DROP FUNCTION IF EXISTS sf_score_C;
+
 DROP PROCEDURE IF EXISTS sp_mbid_add;
 DROP PROCEDURE IF EXISTS sp_artist_add;
 DROP PROCEDURE IF EXISTS sp_album_add;
 DROP PROCEDURE IF EXISTS sp_track_add;
 DROP PROCEDURE IF EXISTS sp_user_add_scrobble;
+DROP PROCEDURE IF EXISTS sp_score_update;
 
 -- TODO: documentation
 DELIMITER !
@@ -76,5 +80,40 @@ BEGIN
     , track_mbid
     , user_name
     );
+END !
+DELIMITER ;
+
+DELIMITER !
+CREATE FUNCTION sf_score_F(delta INT)
+RETURNS DOUBLE
+BEGIN
+  -- HALF_LIFE = 1 / (60 * 60 * 24 * 30)
+  RETURN POW(0.5, delta / (60 * 60 * 24 * 30));
+END !
+DELIMITER ;
+
+DELIMITER !
+CREATE FUNCTION sf_score_C
+  ( t_delta DOUBLE
+  , c_prev  DOUBLE
+  )
+RETURNS DOUBLE
+BEGIN
+  RETURN sf_score_F(0) + sf_score_F(t_delta) * c_prev;
+END !
+DELIMITER ;
+
+-- TODO: documentation
+DELIMITER !
+CREATE PROCEDURE sp_score_update
+  ( user_name   VARCHAR(16)
+  , curr_access INT
+  , mbid        CHAR(36)
+  )
+BEGIN
+  INSERT INTO scores VALUES (user_name, mbid, curr_access, sf_score_F(0))
+  ON DUPLICATE KEY UPDATE
+    last_crf = sf_score_C(curr_access - last_access),
+    last_access = curr_access;
 END !
 DELIMITER ;
