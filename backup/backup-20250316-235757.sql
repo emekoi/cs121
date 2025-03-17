@@ -14157,7 +14157,7 @@ CREATE TABLE `scores` (
   `user_name` varchar(16) NOT NULL,
   `mbid` char(36) NOT NULL,
   `last_access` int(11) NOT NULL,
-  `last_crf` float NOT NULL,
+  `last_crf` double NOT NULL,
   PRIMARY KEY (`user_name`,`mbid`),
   KEY `mbid` (`mbid`),
   CONSTRAINT `scores_ibfk_1` FOREIGN KEY (`mbid`) REFERENCES `mbids` (`mbid`) ON DELETE CASCADE,
@@ -43338,4 +43338,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2025-03-16 23:03:29
+-- Dump completed on 2025-03-16 23:57:58

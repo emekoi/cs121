@@ -1,3 +1,12 @@
+DROP FUNCTION IF EXISTS sf_salt_create;
+DROP FUNCTION IF EXISTS sf_password_hash;
+DROP FUNCTION IF EXISTS sf_user_exists;
+DROP FUNCTION IF EXISTS sf_user_authenticate;
+
+DROP PROCEDURE IF EXISTS sp_user_create;
+DROP PROCEDURE IF EXISTS sp_user_change_password;
+DROP PROCEDURE IF EXISTS sp_user_update_session_key;
+
 -- This function generates a specified number of characters for using
 -- as a salt in passwords.
 DELIMITER !

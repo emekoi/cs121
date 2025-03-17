@@ -11,7 +11,7 @@ CREATE TABLE scores
     -- INFO: A combined measure of frequency and recency used to find MBIDs that
     -- have not been scrobbled recently while supressing MBIDS that have a high
     -- total number of scrobbles.
-  , last_crf    FLOAT       NOT NULL
+  , last_crf    DOUBLE      NOT NULL
   , PRIMARY KEY (user_name, mbid)
   , FOREIGN KEY (mbid)
       REFERENCES mbids(mbid)

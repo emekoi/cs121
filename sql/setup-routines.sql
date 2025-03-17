@@ -1,3 +1,9 @@
+DROP PROCEDURE IF EXISTS sp_mbid_add;
+DROP PROCEDURE IF EXISTS sp_artist_add;
+DROP PROCEDURE IF EXISTS sp_album_add;
+DROP PROCEDURE IF EXISTS sp_track_add;
+DROP PROCEDURE IF EXISTS sp_user_add_scrobble;
+
 -- TODO: documentation
 DELIMITER !
 CREATE PROCEDURE sp_mbid_add

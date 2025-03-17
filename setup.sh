@@ -30,5 +30,7 @@ backup)
 restore)
     mysql -u root <"$2"
     ;;
-*) ;;
+*)
+    mysql -u root <"sql/${1}"
+    ;;
 esac
