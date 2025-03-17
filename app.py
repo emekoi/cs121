@@ -259,7 +259,7 @@ def lastfm_user_import(user: pylast.User) -> int | None:
                         {"artist": artist, "track": track},
                     ).execute(True)
                     break  # success
-                except Exception as e:
+                except Exception:
                     if duration_tries >= 3:
                         continue
 
@@ -405,23 +405,7 @@ def menu_info(args: argparse.Namespace) -> bool:
 
 
 def migration(args: argparse.Namespace) -> bool:
-    with mysql_connection.cursor() as cursor:
-        cursor.execute(
-            """
-SELECT user_name, mbid, artist, album, scrobble_time
-FROM scrobbles
-  NATURAL JOIN tracks
-"""
-        )
-        x = cursor.fetchall()
-        for user_name, track, artist, album, time in x:
-            print(track, artist, album, time)
-            cursor.execute("CALL sp_score_update(%s, %s, %s)", (user_name, time, track))
-            cursor.execute("CALL sp_score_update(%s, %s, %s)", (user_name, time, artist))
-            if album is not None:
-                cursor.execute("CALL sp_score_update(%s, %s, %s)", (user_name, time, album))
-
-
+    return True
 
 
 def main() -> None:
