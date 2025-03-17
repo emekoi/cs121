@@ -128,6 +128,15 @@ def mysql_scrobble_add(username: str, time: int, track: str) -> None:
     mysql_connection.commit()
 
 
+def mysql_score_update(username: str, time: int, mbid: str) -> None:
+    with mysql_connection.cursor() as cursor:
+        cursor.execute(
+            "CALL sp_score_update(%s, %s, %s)",
+            (username, time, mbid),
+        )
+    mysql_connection.commit()
+
+
 # LASTFM UTIL FUNCTIONS
 # ------------------------------------------------------------------------------
 def lastfm_init() -> pylast.LastFMNetwork:
@@ -231,6 +240,7 @@ def lastfm_user_import(user: pylast.User) -> int | None:
                 continue
 
             mysql_artist_add(artist_mbid, artist)
+            mysql_score_update(username, timestamp, artist_mbid)
 
             album = pylast._extract(track_node, "album")
             album_mbid = validate_mbid(
@@ -239,6 +249,7 @@ def lastfm_user_import(user: pylast.User) -> int | None:
 
             if album_mbid is not None:
                 mysql_album_add(album_mbid, album, artist_mbid)
+                mysql_score_update(username, timestamp, album_mbid)
 
             track = pylast._extract(track_node, "name")
             track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
@@ -273,6 +284,7 @@ def lastfm_user_import(user: pylast.User) -> int | None:
             if duration != 0:
                 duration = datetime.timedelta(seconds=duration)
                 mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
+                mysql_score_update(username, timestamp, track_mbid)
                 mysql_scrobble_add(username, timestamp, track_mbid)
 
             advance()
