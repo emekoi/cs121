@@ -10,7 +10,6 @@ import argparse
 import webbrowser
 import os
 import sys
-import time
 
 import mysql.connector
 import mysql.connector.errorcode as errorcode
@@ -19,16 +18,9 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import DataTable, Placeholder, Static
+from textual.widgets import DataTable, Placeholder, Static, ProgressBar
 from textual.widgets import Header, Footer
 from textual.widgets import Button, Input
-
-from rich.status import Status
-
-import rich.console
-import rich.progress
-import rich.prompt
-import rich.text
 
 import pylast
 import pyparsing as pp
@@ -39,8 +31,6 @@ import pyparsing as pp
 DATABSE_NAME = os.getenv("DATABASE_NAME")
 
 __lastfm_network: pylast.LastFMNetwork = None
-
-__console: rich.console.Console = None
 
 
 # GENERAL UTILITIES
@@ -186,135 +176,6 @@ def lastfm_network() -> pylast.LastFMNetwork:
     return __lastfm_network
 
 
-def lastfm_user_import(user: pylast.User) -> int | None:
-    username = user.get_name()
-
-    prev_scrobble_count = mysql_user_scrobble_count(username)
-    curr_scrobble_count = user.get_playcount()
-
-    last_scrobble = mysql_user_last_update(username)
-
-    if prev_scrobble_count >= curr_scrobble_count:
-        return 0
-
-    scrobbles_remaining = curr_scrobble_count - prev_scrobble_count
-    # scrobbles_remaining = min(50, scrobbles_remaining)
-
-    params = user._get_params()
-    params["limit"] = None
-    params["from"] = last_scrobble + 1
-
-    def validate_mbid(mbid: str) -> bool:
-        if mbid and len(mbid) == 36:
-            return mbid
-        else:
-            return None
-
-    with rich.progress.Progress(transient=True) as progress:
-        task = progress.add_task("Importing...", total=scrobbles_remaining)
-        tracks_seen = 0
-
-        def advance() -> bool:
-            nonlocal tracks_seen
-
-            progress.advance(task, advance=1)
-            tracks_seen += 1
-
-            if tracks_seen % 200 == 0:
-                time.sleep(0.1)
-
-        for track_node in pylast._collect_nodes(
-            params["limit"],
-            user,
-            user.ws_prefix + ".getRecentTracks",
-            True,
-            params,
-            stream=True,
-        ):
-            # prevent the now playing track from sneaking in
-            if track_node.hasAttribute("nowplaying"):
-                continue
-
-            scrobbles_remaining -= 1
-
-            timestamp = track_node.getElementsByTagName("date")[0].getAttribute("uts")
-            timestamp = timestamp and int(timestamp)
-            last_scrobble = max(last_scrobble, timestamp)
-
-            artist = pylast._extract(track_node, "artist")
-            artist_mbid = validate_mbid(
-                track_node.getElementsByTagName("artist")[0].getAttribute("mbid")
-            )
-
-            if artist_mbid is None:
-                advance()
-                continue
-
-            mysql_artist_add(artist_mbid, artist)
-            mysql_score_update(username, timestamp, artist_mbid)
-
-            album = pylast._extract(track_node, "album")
-            album_mbid = validate_mbid(
-                track_node.getElementsByTagName("album")[0].getAttribute("mbid")
-            )
-
-            if album_mbid is not None:
-                mysql_album_add(album_mbid, album, artist_mbid)
-                mysql_score_update(username, timestamp, album_mbid)
-
-            track = pylast._extract(track_node, "name")
-            track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
-
-            if track_mbid is None:
-                advance()
-                continue
-
-            # NOTE: ideally we would just use MBIDs here, but since
-            # Last.FM's API is broken and using MBIDs doesn't work 99% of
-            # the time here we are.
-            duration_tries = 1
-            while True:
-                try:
-                    duration = pylast._Request(
-                        lastfm_network(),
-                        "track.getInfo",
-                        {"artist": artist, "track": track},
-                    ).execute(True)
-                    break  # success
-                except Exception:
-                    if duration_tries >= 3:
-                        continue
-
-                    duration_tries += 1
-                    time.sleep(1)
-
-            duration = pylast.cleanup_nodes(duration)
-            duration = pylast._extract(duration, "duration")
-            duration = duration and (int(duration) // 1000)
-
-            if duration != 0:
-                duration = timedelta(seconds=duration)
-                mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
-                mysql_score_update(username, timestamp, track_mbid)
-                mysql_scrobble_add(username, timestamp, track_mbid)
-
-            advance()
-
-        if scrobbles_remaining > 0:
-            progress.advance(task, advance=scrobbles_remaining)
-
-    with mysql_connection.cursor() as cursor:
-        cursor.execute(
-            "UPDATE users\n"
-            "SET user_last_update = GREATEST(user_last_update, %s)\n"
-            "WHERE users.user_name = %s",
-            (last_scrobble, username),
-        )
-    mysql_connection.commit()
-
-    return tracks_seen
-
-
 # SCHEMA TYPES
 # ------------------------------------------------------------------------------
 @dataclass
@@ -411,20 +272,6 @@ class Scrobble:
 class User:
     name: str
     admin: bool = False
-
-    @classmethod
-    def create(cls: any, session_key: str, username: str) -> Self | None:
-        if mysql_user_exists(username):
-            mysql_user_update_session_key(username, session_key)
-            log(f"User '{username}' already exists")
-            return None
-
-        print(f"Username: {username}")
-        password = rich.prompt.Prompt.ask("Password", password=True)
-
-        mysql_user_create(username, password, session_key)
-
-        return cls(username)
 
     @classmethod
     def login(cls: any, username: str, password: str) -> Self | None:
@@ -595,6 +442,178 @@ class SignupScreen(Screen):
             self.dismiss(User(self.username))
 
 
+class ImportScreen(Screen):
+    CSS = """
+    ImportScreen {
+        align: center middle;
+    }
+
+    #dialog {
+        width: auto;
+        height: auto;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Static("Importing..."),
+            ProgressBar(),
+            id="dialog",
+        )
+
+    @work(exclusive=True)
+    async def lastfm_import(self, scrobble_count: int) -> None:
+        progress = self.query_one(ProgressBar)
+
+        user = self.app.user.lastfm()
+        username = user.get_name()
+
+        prev_scrobble_count = mysql_user_scrobble_count(username)
+        curr_scrobble_count = scrobble_count
+
+        last_scrobble = mysql_user_last_update(username)
+
+        if prev_scrobble_count >= curr_scrobble_count:
+            return None
+
+        scrobbles_remaining = curr_scrobble_count - prev_scrobble_count
+
+        params = user._get_params()
+        params["limit"] = None
+        params["from"] = last_scrobble + 1
+
+        def validate_mbid(mbid: str) -> bool:
+            if mbid and len(mbid) == 36:
+                return mbid
+            else:
+                return None
+
+        scrobbles_seen = 0
+
+        async def advance() -> bool:
+            nonlocal scrobbles_seen
+
+            progress.advance(advance=1)
+            scrobbles_seen += 1
+
+            if scrobbles_seen % 200 == 0:
+                await sleep(0.1)
+            else:
+                self.query_one(Static).update(
+                    content=f"Importing {scrobbles_seen}/{scrobble_count} scrobbles."
+                )
+                # NOTE: yield control back to control loop to update display
+                await sleep(0)
+
+        for track_node in pylast._collect_nodes(
+            params["limit"],
+            user,
+            user.ws_prefix + ".getRecentTracks",
+            True,
+            params,
+            stream=True,
+        ):
+            # prevent the now playing track from sneaking in
+            if track_node.hasAttribute("nowplaying"):
+                continue
+
+            scrobbles_remaining -= 1
+            if scrobbles_remaining < 0:
+                break
+
+            timestamp = track_node.getElementsByTagName("date")[0].getAttribute("uts")
+            timestamp = timestamp and int(timestamp)
+            last_scrobble = max(last_scrobble, timestamp)
+
+            artist = pylast._extract(track_node, "artist")
+            artist_mbid = validate_mbid(
+                track_node.getElementsByTagName("artist")[0].getAttribute("mbid")
+            )
+
+            if artist_mbid is None:
+                await advance()
+                continue
+
+            mysql_artist_add(artist_mbid, artist)
+            mysql_score_update(username, timestamp, artist_mbid)
+
+            album = pylast._extract(track_node, "album")
+            album_mbid = validate_mbid(
+                track_node.getElementsByTagName("album")[0].getAttribute("mbid")
+            )
+
+            if album_mbid is not None:
+                mysql_album_add(album_mbid, album, artist_mbid)
+                mysql_score_update(username, timestamp, album_mbid)
+
+            track = pylast._extract(track_node, "name")
+            track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
+
+            if track_mbid is None:
+                await advance()
+                continue
+
+            # NOTE: ideally we would just use MBIDs here, but since
+            # Last.FM's API is broken and using MBIDs doesn't work 99% of
+            # the time here we are.
+            duration_tries = 1
+            while True:
+                try:
+                    duration = pylast._Request(
+                        lastfm_network(),
+                        "track.getInfo",
+                        {"artist": artist, "track": track},
+                    ).execute(True)
+                    break  # success
+                except Exception:
+                    if duration_tries >= 5:
+                        continue
+
+                    duration_tries += 1
+                    await sleep(1)
+
+            duration = pylast.cleanup_nodes(duration)
+            duration = pylast._extract(duration, "duration")
+            duration = duration and (int(duration) // 1000)
+
+            if duration != 0:
+                duration = timedelta(seconds=duration)
+                mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
+                mysql_score_update(username, timestamp, track_mbid)
+                mysql_scrobble_add(username, timestamp, track_mbid)
+
+            await advance()
+
+        if scrobbles_remaining > 0:
+            progress.advance(advance=scrobbles_remaining)
+
+        with mysql_connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE users\n"
+                "SET user_last_update = GREATEST(user_last_update, %s)\n"
+                "WHERE users.user_name = %s",
+                (last_scrobble, username),
+            )
+        mysql_connection.commit()
+
+        self.dismiss()
+
+    @work
+    async def on_mount(self) -> None:
+        # scrobble_count = self.app.user.lastfm().get_playcount()
+        scrobble_count = 200
+
+        self.query_one(Static).update(
+            content=f"Importing 0/{scrobble_count} scrobbles."
+        )
+        self.query_one(ProgressBar).update(total=scrobble_count)
+
+        # NOTE: yield control back to control loop to update display
+        await sleep(0)
+
+        self.lastfm_import(scrobble_count)
+
+
 class SearchScreen(Screen):
     CSS = """
     DataTable {
@@ -611,7 +630,7 @@ class SearchScreen(Screen):
     @work
     async def load_scrobbles(self, table: DataTable) -> None:
         for s in self.app.user.scrobbles():
-            table.add_row(s.time, rich.text.Text(s.track.name), s.track.artist.name)
+            table.add_row(s.time, s.track.name, s.track.artist.name)
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
@@ -654,24 +673,12 @@ class Main(App):
     @work
     async def on_mount(self) -> None:
         self.user = await self.push_screen_wait(StartScreen())
+        await self.push_screen_wait(ImportScreen())
         self.switch_mode("search")
 
 
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
-# def menu_sign_up(args: argparse.Namespace) -> None:
-#     user = User.create()
-#     if user is None:
-#         log("Failed to create account.")
-#         return None
-
-#     log(f"Created user {user.name}")
-
-#     count = lastfm_user_import(user.lastfm())
-#     print(f"Processed {count} scrobbles.")
-#     return None
-
-
 def migration(args: argparse.Namespace) -> None:
     return None
 
@@ -709,7 +716,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     __lastfm_network = lastfm_init()
-    __console = rich.console.Console()
 
     try:
         main()
