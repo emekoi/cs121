@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-# from textual.app import App, ComposeResult
-# from textual.binding import Binding
-# from textual.widgets import DataTable, Header, Footer
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.screen import Screen
+from textual.widgets import DataTable, Header, Footer, Placeholder
 from typing import Self
 
 import argparse
@@ -336,16 +337,66 @@ class MBEntry:
 
 @dataclass
 class Artist(MBEntry):
-    # def get_albums(self: Self):
-    #     pass
-    pass
+    def albums(self: Self) -> Generator[Album]:
+        with mysql_connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                """
+                SELECT album,
+                       album_name,
+                FROM display_albums
+                WHERE artist = %s
+                """,
+                (self.mbid,),
+            )
+            for row in cursor:
+                yield Album(row["album_name"], row["album"], self)
+
+    def tracks(self: Self) -> Generator[Track]:
+        with mysql_connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                """
+                SELECT track,
+                       album,
+                       track_name,
+                       album_name,
+                       track_length
+                FROM display_tracks
+                WHERE artist = %s
+                """,
+                (self.mbid,),
+            )
+            for row in cursor:
+                if album := row["album"]:
+                    album = Album(row["album_name"], row["album"], self)
+                yield Track(
+                    row["track_name"], row["track"], album, self, row["track_length"]
+                )
 
 
 @dataclass
 class Album(MBEntry):
     artist: Artist
-    # def get_tracks(self: Self):
-    #     pass
+
+    def tracks(self: Self) -> Generator[Track]:
+        with mysql_connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                """
+                SELECT track,
+                       track_name,
+                       track_length
+                FROM display_tracks
+                WHERE album = %s
+                """,
+                (self.mbid,),
+            )
+            for row in cursor:
+                yield Track(
+                    row["track_name"],
+                    row["track"],
+                    self,
+                    self.artist,
+                    row["track_length"],
+                )
 
 
 @dataclass
@@ -414,7 +465,8 @@ class User:
                        album_name,
                        artist_name,
                        scrobble_time,
-                       track_length
+                       track_length,
+                       scrobble_id
                 FROM display_tracks
                   JOIN scrobbles ON (mbid = track)
                 WHERE user_name = %s
@@ -422,12 +474,97 @@ class User:
                 (self.name,),
             )
             for row in cursor:
-                time = datetime.fromtimestamp(row["scrobble_time"])
-                length = row["track_length"]
                 artist = Artist(row["artist_name"], row["artist"])
-                album = row["album"] and Album(row["album_name"], row["album"], artist)
-                track = Track(row["track_name"], row["track"], album, artist, length)
-                yield Scrobble(track, time)
+                if album := row["album"]:
+                    album = Album(row["album_name"], row["album"], self)
+                track = Track(
+                    row["track_name"], row["track"], album, artist, row["track_length"]
+                )
+                # yield Scrobble(track, time), rows['scrobble_id']
+                yield Scrobble(track, datetime.fromtimestamp(row["scrobble_time"]))
+
+
+class TableApp(App):
+    BINDINGS = [Binding("ctrl+q", "quit", "Quit", show=True, priority=True)]
+
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+
+    DataTable {
+        width: 100%;
+        height: 40%;
+    }
+
+    """
+
+    ENABLE_COMMAND_PALETTE = False
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield DataTable()
+        yield Footer()
+
+    def on_mount(self) -> None:
+        ROWS = [
+            ("lane", "swimmer", "country", "time"),
+            (4, "Joseph Schooling", "Singapore", 50.39),
+            (2, "Michael Phelps", "United States", 51.14),
+            (5, "Chad le Clos", "South Africa", 51.14),
+            (6, "László Cseh", "Hungary", 51.14),
+            (3, "Li Zhuhao", "China", 51.26),
+            (8, "Mehdy Metella", "France", 51.58),
+            (7, "Tom Shields", "United States", 51.73),
+            (1, "Aleksandr Sadovnikov", "Russia", 51.84),
+            (10, "Darren Burns", "Scotland", 51.84),
+        ]
+
+        table = self.query_one(DataTable)
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+        table.add_columns(*ROWS[0])
+        table.add_rows(ROWS[1:])
+
+
+class DashboardScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Placeholder("Dashboard Screen")
+        yield Footer()
+
+
+class SettingsScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Placeholder("Settings Screen")
+        yield Footer()
+
+
+class HelpScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Placeholder("Help Screen")
+        yield Footer()
+
+
+class Main(App):
+    TITLE = "Scrobble Browser"
+
+    ENABLE_COMMAND_PALETTE = False
+
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
+        ("d", "switch_mode('dashboard')", "Dashboard"),
+        ("s", "switch_mode('settings')", "Settings"),
+        ("h", "switch_mode('help')", "Help"),
+    ]
+
+    MODES = {
+        "dashboard": DashboardScreen,
+        "settings": SettingsScreen,
+        "help": HelpScreen,
+    }
+
+    def on_mount(self) -> None:
+        self.switch_mode("dashboard")
 
 
 # MAIN FUNCTIONS
@@ -471,56 +608,9 @@ def menu_info(args: argparse.Namespace) -> bool:
     if user is None:
         return False
 
-    print(list(user.scrobbles()))
+    # print(list(user.scrobbles()))
 
-    # ROWS = [
-    #     ("lane", "swimmer", "country", "time"),
-    #     (4  , "Joseph Schooling", "Singapore", 50.39),
-    #     (2  , "Michael Phelps"  , "United States", 51.14),
-    #     (5  , "Chad le Clos"    , "South Africa", 51.14),
-    #     (6  , "László Cseh"     , "Hungary", 51.14),
-    #     (3  , "Li Zhuhao"       , "China", 51.26),
-    #     (8  , "Mehdy Metella"   , "France", 51.58),
-    #     (7  , "Tom Shields"      , "United States", 51.73),
-    #     (1  , "Aleksandr Sadovnikov", "Russia", 51.84),
-    #     (10 , "Darren Burns", "Scotland", 51.84),
-    # ]
-
-    # class TableApp(App):
-    #     BINDINGS = [
-    #         Binding("ctrl+q", "quit", "Quit", show=True, priority=True)
-    #     ]
-
-    #     CSS = """
-    #     Screen {
-    #         align: center middle;
-    #     }
-
-    #     DataTable {
-    #         width: 100%;
-    #         height: 40%;
-    #     }
-
-    #     """
-
-    #     ENABLE_COMMAND_PALETTE = False
-
-    #     name = "Scrobble Browser"
-
-    #     def compose(self) -> ComposeResult:
-    #         yield Header()
-    #         yield DataTable()
-    #         yield Footer()
-
-    #     def on_mount(self) -> None:
-    #         table = self.query_one(DataTable)
-    #         table.cursor_type = "row"
-    #         table.zebra_stripes = True
-    #         table.add_columns(*ROWS[0])
-    #         table.add_rows(ROWS[1:])
-
-    # app = TableApp()
-    # app.run()
+    Main().run()
 
     return True
 
