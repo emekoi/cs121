@@ -521,8 +521,6 @@ class LoginScreen(Screen):
         password = self.query_one("#password", Input).value
         if username != "" and password != "":
             if user := User.login(username, password):
-                # count = lastfm_user_import(user.lastfm())
-                # print(f"Processed {count} scrobbles.")
                 self.dismiss(user)
             else:
                 self.notify("Invalid username or password.", severity="error")
@@ -558,13 +556,17 @@ class SignupScreen(Screen):
 
         while True:
             try:
-                self.session_key, self.username = skg.get_web_auth_session_key_username(
-                    url
-                )
-                self.query_one("#dialog").loading = False
-                # self.session_key = session_key
-                # self.username = username
+                result = skg.get_web_auth_session_key_username(url)
+                self.session_key, self.username = result
 
+                if mysql_user_exists(self.username):
+                    mysql_user_update_session_key(self.username, self.session_key)
+                    self.notify(
+                        f"User '{self.username}' already exists.", severity="error"
+                    )
+                    self.app.pop_screen()
+                else:
+                    self.query_one("#dialog").loading = False
             except pylast.WSError:
                 await sleep(1)
 
@@ -583,26 +585,8 @@ class SignupScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         password = self.query_one("#password", Input).value
         if password != "":
-            if mysql_user_exists(self.username):
-                mysql_user_update_session_key(username, session_key)
-                self.notify(f"User '{self.username}' already exists.", severity="error")
-
-            # print(f"Username: {username}")
-            # password = rich.prompt.Prompt.ask("Password", password=True)
-
-            # mysql_user_create(username, password, session_key)
-
-            # user = User.login(username, password)
-
-            # if user is None:
-            #     self.notify("Invalid username or password.", severity="error")
-            #     return None
-
-            # # count = lastfm_user_import(user.lastfm())
-            # # print(f"Processed {count} scrobbles.")
-
-            # self.dismiss(user)
-            pass
+            mysql_user_create(self.username, self.password, self.session_key)
+            self.dismiss(User(self.username))
         else:
             self.notify("Invalid password.", severity="error")
 
