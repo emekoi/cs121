@@ -505,103 +505,116 @@ class ImportScreen(Screen):
                 # NOTE: yield control back to control loop to update display
                 await sleep(0)
 
-        for track_node in pylast._collect_nodes(
-            params["limit"],
-            user,
-            user.ws_prefix + ".getRecentTracks",
-            True,
-            params,
-            stream=True,
-        ):
-            # prevent the now playing track from sneaking in
-            if track_node.hasAttribute("nowplaying"):
-                continue
+        try:
+            for track_node in pylast._collect_nodes(
+                params["limit"],
+                user,
+                user.ws_prefix + ".getRecentTracks",
+                True,
+                params,
+                stream=True,
+            ):
+                # prevent the now playing track from sneaking in
+                if track_node.hasAttribute("nowplaying"):
+                    continue
 
-            scrobbles_remaining -= 1
-            if scrobbles_remaining < 0:
-                break
+                scrobbles_remaining -= 1
+                if scrobbles_remaining < 0:
+                    break
 
-            timestamp = track_node.getElementsByTagName("date")[0].getAttribute("uts")
-            timestamp = timestamp and int(timestamp)
-            last_scrobble = max(last_scrobble, timestamp)
+                timestamp = track_node.getElementsByTagName("date")[0].getAttribute(
+                    "uts"
+                )
+                timestamp = timestamp and int(timestamp)
+                last_scrobble = max(last_scrobble, timestamp)
 
-            artist = pylast._extract(track_node, "artist")
-            artist_mbid = validate_mbid(
-                track_node.getElementsByTagName("artist")[0].getAttribute("mbid")
-            )
+                artist = pylast._extract(track_node, "artist")
+                artist_mbid = validate_mbid(
+                    track_node.getElementsByTagName("artist")[0].getAttribute("mbid")
+                )
 
-            if artist_mbid is None:
+                if artist_mbid is None:
+                    await advance()
+                    continue
+
+                mysql_artist_add(artist_mbid, artist)
+                mysql_score_update(username, timestamp, artist_mbid)
+
+                album = pylast._extract(track_node, "album")
+                album_mbid = validate_mbid(
+                    track_node.getElementsByTagName("album")[0].getAttribute("mbid")
+                )
+
+                if album_mbid is not None:
+                    mysql_album_add(album_mbid, album, artist_mbid)
+                    mysql_score_update(username, timestamp, album_mbid)
+
+                track = pylast._extract(track_node, "name")
+                track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
+
+                if track_mbid is None:
+                    await advance()
+                    continue
+
+                # NOTE: ideally we would just use MBIDs here, but since
+                # Last.FM's API is broken and using MBIDs doesn't work 99% of
+                # the time here we are.
+                duration_tries = 1
+                while True:
+                    try:
+                        duration = pylast._Request(
+                            lastfm_network(),
+                            "track.getInfo",
+                            {"artist": artist, "track": track},
+                        ).execute(True)
+                        break  # success
+                    except Exception:
+                        if duration_tries >= 5:
+                            continue
+
+                        duration_tries += 1
+                        await sleep(1)
+
+                duration = pylast.cleanup_nodes(duration)
+                duration = pylast._extract(duration, "duration")
+                duration = duration and (int(duration) // 1000)
+
+                if duration != 0:
+                    duration = timedelta(seconds=duration)
+                    mysql_track_add(
+                        track_mbid, track, artist_mbid, album_mbid, duration
+                    )
+                    mysql_score_update(username, timestamp, track_mbid)
+                    mysql_scrobble_add(username, timestamp, track_mbid)
+
                 await advance()
-                continue
 
-            mysql_artist_add(artist_mbid, artist)
-            mysql_score_update(username, timestamp, artist_mbid)
+        except pylast.PyLastError:
+            pass
 
-            album = pylast._extract(track_node, "album")
-            album_mbid = validate_mbid(
-                track_node.getElementsByTagName("album")[0].getAttribute("mbid")
-            )
+        finally:
 
-            if album_mbid is not None:
-                mysql_album_add(album_mbid, album, artist_mbid)
-                mysql_score_update(username, timestamp, album_mbid)
+            if scrobbles_remaining > 0:
+                progress.advance(advance=scrobbles_remaining)
 
-            track = pylast._extract(track_node, "name")
-            track_mbid = validate_mbid(pylast._extract(track_node, "mbid"))
+            with mysql_connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users\n"
+                    "SET user_last_update = GREATEST(user_last_update, %s)\n"
+                    "WHERE users.user_name = %s",
+                    (last_scrobble, username),
+                )
 
-            if track_mbid is None:
-                await advance()
-                continue
-
-            # NOTE: ideally we would just use MBIDs here, but since
-            # Last.FM's API is broken and using MBIDs doesn't work 99% of
-            # the time here we are.
-            duration_tries = 1
-            while True:
-                try:
-                    duration = pylast._Request(
-                        lastfm_network(),
-                        "track.getInfo",
-                        {"artist": artist, "track": track},
-                    ).execute(True)
-                    break  # success
-                except Exception:
-                    if duration_tries >= 5:
-                        continue
-
-                    duration_tries += 1
-                    await sleep(1)
-
-            duration = pylast.cleanup_nodes(duration)
-            duration = pylast._extract(duration, "duration")
-            duration = duration and (int(duration) // 1000)
-
-            if duration != 0:
-                duration = timedelta(seconds=duration)
-                mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
-                mysql_score_update(username, timestamp, track_mbid)
-                mysql_scrobble_add(username, timestamp, track_mbid)
-
-            await advance()
-
-        if scrobbles_remaining > 0:
-            progress.advance(advance=scrobbles_remaining)
-
-        with mysql_connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE users\n"
-                "SET user_last_update = GREATEST(user_last_update, %s)\n"
-                "WHERE users.user_name = %s",
-                (last_scrobble, username),
-            )
-        mysql_connection.commit()
-
-        self.dismiss()
+            mysql_connection.commit()
+            self.dismiss()
 
     @work
     async def on_mount(self) -> None:
-        # scrobble_count = self.app.user.lastfm().get_playcount()
-        scrobble_count = 200
+        try:
+            # scrobble_count = self.app.user.lastfm().get_playcount()
+            scrobble_count = 200
+        except pylast.PyLastError:
+            self.dismiss()
 
         self.query_one(Static).update(
             content=f"Importing 0/{scrobble_count} scrobbles."
@@ -659,9 +672,9 @@ class Main(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
-        ("s", "switch_mode('search')", "Search"),
-        ("r", "switch_mode('report')", "Report"),
-        ("R", "switch_mode('recommend')", "Recommend"),
+        ("ctrl+f", "switch_mode('search')", "Search"),
+        ("ctrl+r", "switch_mode('report')", "Report"),
+        ("ctrl+t", "switch_mode('recommend')", "Recommend"),
     ]
 
     MODES = {
