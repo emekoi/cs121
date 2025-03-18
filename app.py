@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from rich.text import Text
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.widgets import DataTable, Header, Footer
-from typing import NamedTuple
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+# from textual.app import App, ComposeResult
+# from textual.binding import Binding
+# from textual.widgets import DataTable, Header, Footer
 from typing import Self
 
 import argparse
-import datetime
 import os
 import sys
 import time
@@ -131,7 +130,7 @@ def mysql_album_add(mbid: str, name: str, artist: str) -> None:
 
 
 def mysql_track_add(
-    mbid: str, name: str, artist: str, album: str | None, length: datetime.timedelta
+    mbid: str, name: str, artist: str, album: str | None, length: timedelta
 ) -> None:
     with mysql_connection.cursor() as cursor:
         cursor.execute(
@@ -304,7 +303,7 @@ def lastfm_user_import(user: pylast.User) -> int | None:
             duration = duration and (int(duration) // 1000)
 
             if duration != 0:
-                duration = datetime.timedelta(seconds=duration)
+                duration = timedelta(seconds=duration)
                 mysql_track_add(track_mbid, track, artist_mbid, album_mbid, duration)
                 mysql_score_update(username, timestamp, track_mbid)
                 mysql_scrobble_add(username, timestamp, track_mbid)
@@ -328,43 +327,48 @@ def lastfm_user_import(user: pylast.User) -> int | None:
 
 # SCHEMA TYPES
 # ------------------------------------------------------------------------------
-class MBEntry(NamedTuple):
-    mbid: str
+@dataclass
+class MBEntry:
     name: str
+    mbid: str
     # genres: Generator[str]
 
 
+@dataclass
 class Artist(MBEntry):
     # def get_albums(self: Self):
     #     pass
-   pass
+    pass
 
 
+@dataclass
 class Album(MBEntry):
     artist: Artist
     # def get_tracks(self: Self):
     #     pass
 
 
+@dataclass
 class Track(MBEntry):
     album: Album | None
     artist: Artist
-    length: datetime.timedelta
+    length: timedelta
 
 
-class Score(NamedTuple):
-    user: User
+@dataclass
+class Score:
     entry: MBEntry
     score: float
 
 
-class Scrobble(NamedTuple):
-    time: datetime.datetime
+@dataclass
+class Scrobble:
     track: Track
-    user: User
+    time: datetime
 
 
-class User(NamedTuple):
+@dataclass
+class User:
     name: str
     admin: bool = False
 
@@ -400,16 +404,30 @@ class User(NamedTuple):
         return lastfm_network().get_user(self.name)
 
     def scrobbles(self: Self) -> Generator[Scrobble]:
-        with mysql_connection.cursor(named_tuple=True) as cursor:
+        with mysql_connection.cursor(dictionary=True) as cursor:
             cursor.execute(
                 """
-              SELECT scrobble_time, mbid FROM scrobbles NATURAL JOIN tracks
-              WHERE user_name = %s
-              """,
+                SELECT track,
+                       album,
+                       artist,
+                       track_name,
+                       album_name,
+                       artist_name,
+                       scrobble_time,
+                       track_length
+                FROM display_tracks
+                  JOIN scrobbles ON (mbid = track)
+                WHERE user_name = %s
+                """,
                 (self.name,),
             )
-            for x in cursor:
-                yield x
+            for row in cursor:
+                time = datetime.fromtimestamp(row["scrobble_time"])
+                length = row["track_length"]
+                artist = Artist(row["artist_name"], row["artist"])
+                album = row["album"] and Album(row["album_name"], row["album"], artist)
+                track = Track(row["track_name"], row["track"], album, artist, length)
+                yield Scrobble(track, time)
 
 
 # MAIN FUNCTIONS
@@ -429,8 +447,11 @@ def menu_sign_up(args: argparse.Namespace) -> bool:
 
 
 def menu_login() -> User | None:
-    username = rich.prompt.Prompt.ask("Username")
-    password = rich.prompt.Prompt.ask("Password", password=False)
+    # username = rich.prompt.Prompt.ask("Username")
+    # password = rich.prompt.Prompt.ask("Password", password=False)
+    username = "emekoi"
+    password = "password"
+
     user = User.login(username, password)
 
     if user is None:
@@ -447,7 +468,7 @@ def menu_login() -> User | None:
 
 def menu_info(args: argparse.Namespace) -> bool:
     user = menu_login()
-    if user is None :
+    if user is None:
         return False
 
     print(list(user.scrobbles()))

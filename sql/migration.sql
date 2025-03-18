@@ -26,7 +26,16 @@
 -- SELECT mbid_name AS track_name, artist_name
 -- FROM tracks NATURAL JOIN mbids NATURAL JOIN ();
 
-SELECT mbid_name AS track_name, artist_name, album_name
+SELECT mbid_name AS track_name, artist_name
+FROM tracks
+  NATURAL JOIN mbids
+  NATURAL JOIN
+    ( SELECT mbid AS artist, mbid_name AS artist_name
+      FROM (artists NATURAL JOIN mbids)) AS ARTIST
+  WHERE album IS NULL;
+
+
+SELECT mbid, mbid_name AS track_name, artist_name, album_name
 FROM tracks
   NATURAL JOIN mbids
   NATURAL JOIN
@@ -34,7 +43,7 @@ FROM tracks
       FROM (artists NATURAL JOIN mbids)) AS ARTIST
   LEFT JOIN
     ( SELECT mbid AS album, mbid_name AS album_name
-      FROM (albums NATURAL JOIN mbids)) AS ALBUM ON (album = mbid)
+      FROM (albums NATURAL JOIN mbids)) AS ALBUM USING (album)
   ;
 
 SELECT mbid_name AS track_name, artist_name, album_name
