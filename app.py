@@ -23,6 +23,8 @@ import pyparsing as pp
 import rich.console
 import rich.progress
 import rich.prompt
+import rich.text
+import textual
 
 
 # GLOBAL VARIABLES
@@ -470,6 +472,7 @@ class User:
                 FROM display_tracks
                   JOIN scrobbles ON (mbid = track)
                 WHERE user_name = %s
+                ORDER BY scrobble_time DESC
                 """,
                 (self.name,),
             )
@@ -480,68 +483,45 @@ class User:
                 track = Track(
                     row["track_name"], row["track"], album, artist, row["track_length"]
                 )
-                # yield Scrobble(track, time), rows['scrobble_id']
-                yield Scrobble(track, datetime.fromtimestamp(row["scrobble_time"]))
+
+                yield Scrobble(
+                    track,
+                    datetime.fromtimestamp(row["scrobble_time"]),
+                )
 
 
-class TableApp(App):
-    BINDINGS = [Binding("ctrl+q", "quit", "Quit", show=True, priority=True)]
-
+class SearchScreen(Screen):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-
     DataTable {
         width: 100%;
-        height: 40%;
+        text-overflow: ellipsis;  # Overflowing text is truncated with an ellipsis
     }
-
     """
-
-    ENABLE_COMMAND_PALETTE = False
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield DataTable()
+        yield DataTable(cursor_type="row", zebra_stripes=True)
         yield Footer()
 
     def on_mount(self) -> None:
-        ROWS = [
-            ("lane", "swimmer", "country", "time"),
-            (4, "Joseph Schooling", "Singapore", 50.39),
-            (2, "Michael Phelps", "United States", 51.14),
-            (5, "Chad le Clos", "South Africa", 51.14),
-            (6, "László Cseh", "Hungary", 51.14),
-            (3, "Li Zhuhao", "China", 51.26),
-            (8, "Mehdy Metella", "France", 51.58),
-            (7, "Tom Shields", "United States", 51.73),
-            (1, "Aleksandr Sadovnikov", "Russia", 51.84),
-            (10, "Darren Burns", "Scotland", 51.84),
-        ]
-
         table = self.query_one(DataTable)
-        table.cursor_type = "row"
-        table.zebra_stripes = True
-        table.add_columns(*ROWS[0])
-        table.add_rows(ROWS[1:])
+        table.add_columns("Date", "Track", "Artist")
+
+        for s in self.app.user.scrobbles():
+            table.add_row(s.time, rich.text.Text(s.track.name), s.track.artist.name)
 
 
-class DashboardScreen(Screen):
+class ReportScreen(Screen):
     def compose(self) -> ComposeResult:
-        yield Placeholder("Dashboard Screen")
+        yield Header()
+        yield Placeholder("Report Screen")
         yield Footer()
 
 
-class SettingsScreen(Screen):
+class RecommendScreen(Screen):
     def compose(self) -> ComposeResult:
-        yield Placeholder("Settings Screen")
-        yield Footer()
-
-
-class HelpScreen(Screen):
-    def compose(self) -> ComposeResult:
-        yield Placeholder("Help Screen")
+        yield Header()
+        yield Placeholder("Recommendation Screen")
         yield Footer()
 
 
@@ -551,20 +531,24 @@ class Main(App):
     ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
-        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
-        ("d", "switch_mode('dashboard')", "Dashboard"),
-        ("s", "switch_mode('settings')", "Settings"),
-        ("h", "switch_mode('help')", "Help"),
+        ("ctrl+q", "quit", "Quit"),
+        ("s", "switch_mode('search')", "Search"),
+        ("r", "switch_mode('report')", "Report"),
+        ("R", "switch_mode('recommend')", "Recommend"),
     ]
 
     MODES = {
-        "dashboard": DashboardScreen,
-        "settings": SettingsScreen,
-        "help": HelpScreen,
+        "search": SearchScreen,
+        "report": ReportScreen,
+        "recommend": RecommendScreen,
     }
 
+    def __init__(self: Self, user: User):
+        self.user = user
+        super().__init__()
+
     def on_mount(self) -> None:
-        self.switch_mode("dashboard")
+        self.switch_mode("search")
 
 
 # MAIN FUNCTIONS
@@ -609,8 +593,8 @@ def menu_info(args: argparse.Namespace) -> bool:
         return False
 
     # print(list(user.scrobbles()))
-
-    Main().run()
+    if not user.admin:
+        Main(user).run()
 
     return True
 
