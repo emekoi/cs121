@@ -3,29 +3,32 @@ from __future__ import annotations
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.screen import Screen
-from textual.widgets import DataTable, Header, Footer, Placeholder
 from typing import Self
 
 import argparse
+import webbrowser
 import os
 import sys
 import time
-import webbrowser
 
 import mysql.connector
 import mysql.connector.errorcode as errorcode
 
+from textual import work
+from textual.app import App, ComposeResult
+from textual.containers import Grid, Vertical, Horizontal
+from textual.screen import Screen
+from textual.widgets import DataTable, Placeholder, Static
+from textual.widgets import Header, Footer
+from textual.widgets import Label, Button, Input
+
 import pylast
 import pyparsing as pp
+
 import rich.console
 import rich.progress
 import rich.prompt
 import rich.text
-import textual
-
 
 # GLOBAL VARIABLES
 # ------------------------------------------------------------------------------
@@ -179,7 +182,7 @@ def lastfm_network() -> pylast.LastFMNetwork:
     return __lastfm_network
 
 
-def lastfm_user_auth(retry_count: int) -> tuple[str, str] | None:
+def lastfm_user_auth(retry_count: int, cb, err) -> tuple[str, str] | None:
     skg = pylast.SessionKeyGenerator(lastfm_network())
     url = skg.get_web_auth_url()
 
@@ -490,6 +493,95 @@ class User:
                 )
 
 
+# UI
+# ------------------------------------------------------------------------------
+class StartScreen(Screen):
+    CSS = """
+    StartScreen {
+        align: center middle;
+    }
+
+    Button {
+        width: 50%;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Button("Sign Up", id="sign-up")
+        yield Button("Login", id="login")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id)
+
+
+class LoginScreen(Screen):
+    CSS = """
+    LoginScreen {
+        align: center middle;
+    }
+
+    * {
+        width: 50%;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="USERNAME", id="username")
+        yield Input(placeholder="PASSWORD", id="password", password=True)
+        yield Button("Login")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        username = self.query_one("#username", Input).value
+        password = self.query_one("#password", Input).value
+        if username != "" and password != "":
+            user = User.login(username, password)
+
+            if user is None:
+                self.notify("Invalid username or password.", severity="error")
+                return None
+
+            # count = lastfm_user_import(user.lastfm())
+            # print(f"Processed {count} scrobbles.")
+
+            self.dismiss(user)
+        else:
+            self.notify("Invalid username or password.", severity="error")
+
+
+class SignupScreen(Screen):
+    CSS = """
+    SignupScreen {
+        align: center middle;
+    }
+
+    * {
+        width: 50%;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="USERNAME", id="username")
+        yield Input(placeholder="PASSWORD", id="password", password=True)
+        yield Button("Login")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        username = self.query_one("#username", Input).value
+        password = self.query_one("#password", Input).value
+        if username != "" and password != "":
+            user = User.login(username, password)
+
+            if user is None:
+                self.notify("Invalid username or password.", severity="error")
+                return None
+
+            # count = lastfm_user_import(user.lastfm())
+            # print(f"Processed {count} scrobbles.")
+
+            self.dismiss(user)
+        else:
+            self.notify("Invalid username or password.", severity="error")
+
+
 class SearchScreen(Screen):
     CSS = """
     DataTable {
@@ -543,64 +635,38 @@ class Main(App):
         "recommend": RecommendScreen,
     }
 
-    def __init__(self: Self, user: User):
-        self.user = user
-        super().__init__()
-
-    def on_mount(self) -> None:
-        self.switch_mode("search")
+    @work
+    async def on_mount(self) -> None:
+        cmd = await self.push_screen_wait(StartScreen())
+        if cmd == "login":
+            self.user = await self.push_screen_wait(LoginScreen())
+            self.switch_mode("search")
+        else:
+            self.quit()
 
 
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
-def menu_sign_up(args: argparse.Namespace) -> bool:
+def menu_sign_up(args: argparse.Namespace) -> None:
     user = User.create()
     if user is None:
         log("Failed to create account.")
-        return False
+        return None
 
     log(f"Created user {user.name}")
 
     count = lastfm_user_import(user.lastfm())
     print(f"Processed {count} scrobbles.")
-
-    return True
-
-
-def menu_login() -> User | None:
-    # username = rich.prompt.Prompt.ask("Username")
-    # password = rich.prompt.Prompt.ask("Password", password=False)
-    username = "emekoi"
-    password = "password"
-
-    user = User.login(username, password)
-
-    if user is None:
-        log("Invalid username or password.")
-        return None
-
-    log("Sign in successful.")
-
-    count = lastfm_user_import(user.lastfm())
-    print(f"Processed {count} scrobbles.")
-
-    return user
+    return None
 
 
-def menu_info(args: argparse.Namespace) -> bool:
-    user = menu_login()
-    if user is None:
-        return False
-
-    # print(list(user.scrobbles()))
-    if not user.admin:
-        Main(user).run()
-
-    return True
+def menu_info(args: argparse.Namespace) -> None:
+    Main().run()
+    return None
 
 
-def migration(args: argparse.Namespace) -> bool:
-    return True
+def migration(args: argparse.Namespace) -> None:
+    return None
 
 
 def main() -> None:
@@ -613,8 +679,8 @@ def main() -> None:
     parser_login = subparsers.add_parser("info")
     parser_login.set_defaults(func=menu_info)
 
-    parser_login = subparsers.add_parser("migration")
-    parser_login.set_defaults(func=migration)
+    # parser_login = subparsers.add_parser("migration")
+    # parser_login.set_defaults(func=migration)
 
     args = parser.parse_args()
     args.func(args)
