@@ -17,6 +17,7 @@ CREATE PROCEDURE sp_mbid_add
   )
 BEGIN
   INSERT INTO mbids VALUES (mbid, mbid_name, mbid_type)
+  -- NOTE: NO OP
   ON DUPLICATE KEY UPDATE mbid = mbid;
 END !
 DELIMITER ;
@@ -30,6 +31,7 @@ CREATE PROCEDURE sp_artist_add
 BEGIN
   CALL sp_mbid_add(artist_mbid, artist_name, 'artist');
   INSERT INTO artists VALUES (artist_mbid)
+  -- NOTE: NO OP
   ON DUPLICATE KEY UPDATE mbid = mbid;
 END !
 DELIMITER ;
@@ -44,7 +46,7 @@ CREATE PROCEDURE sp_album_add
 BEGIN
   CALL sp_mbid_add(album_mbid, album_name, 'album');
   INSERT INTO albums VALUES (album_mbid, album_artist)
-  ON DUPLICATE KEY UPDATE mbid = mbid;
+  ON DUPLICATE KEY UPDATE artist = album_artist;
 END !
 DELIMITER ;
 
@@ -60,7 +62,10 @@ CREATE PROCEDURE sp_track_add
 BEGIN
   CALL sp_mbid_add(track_mbid, track_name, 'track');
   INSERT INTO tracks VALUES (track_mbid, track_artist, track_album, track_length)
-  ON DUPLICATE KEY UPDATE mbid = mbid;
+  ON DUPLICATE KEY UPDATE
+    artist = track_artist,
+    album = track_album,
+    length = track_length;
 END !
 DELIMITER ;
 

@@ -335,15 +335,15 @@ class MBEntry(NamedTuple):
 
 
 class Artist(MBEntry):
-    def get_albums(self: Self):
-        pass
+    # def get_albums(self: Self):
+    #     pass
+   pass
 
 
 class Album(MBEntry):
     artist: Artist
-
-    def get_tracks(self: Self):
-        pass
+    # def get_tracks(self: Self):
+    #     pass
 
 
 class Track(MBEntry):
@@ -370,7 +370,8 @@ class User(NamedTuple):
 
     @classmethod
     def create(cls: any, retry_count: int = 5) -> Self | None:
-        if (result := lastfm_user_auth(retry_count)) is None:
+        result = lastfm_user_auth(retry_count)
+        if result is None:
             return None
 
         session_key, username = result
@@ -399,10 +400,10 @@ class User(NamedTuple):
         return lastfm_network().get_user(self.name)
 
     def scrobbles(self: Self) -> Generator[Scrobble]:
-        with mysql_connection.cursor() as cursor:
+        with mysql_connection.cursor(named_tuple=True) as cursor:
             cursor.execute(
                 """
-              SELECT scrobble_id, scrobble_time, mbid FROM scrobbles NATURAL JOIN tracks
+              SELECT scrobble_time, mbid FROM scrobbles NATURAL JOIN tracks
               WHERE user_name = %s
               """,
                 (self.name,),
@@ -414,7 +415,8 @@ class User(NamedTuple):
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
 def menu_sign_up(args: argparse.Namespace) -> bool:
-    if (user := User.create()) is None:
+    user = User.create()
+    if user is None:
         log("Failed to create account.")
         return False
 
@@ -426,74 +428,78 @@ def menu_sign_up(args: argparse.Namespace) -> bool:
     return True
 
 
-def menu_login() -> bool:
+def menu_login() -> User | None:
     username = rich.prompt.Prompt.ask("Username")
     password = rich.prompt.Prompt.ask("Password", password=False)
     user = User.login(username, password)
 
     if user is None:
         log("Invalid username or password.")
-        return False
+        return None
 
     log("Sign in successful.")
 
     count = lastfm_user_import(user.lastfm())
     print(f"Processed {count} scrobbles.")
 
-    return True
+    return user
 
 
 def menu_info(args: argparse.Namespace) -> bool:
-    if not menu_login():
+    user = menu_login()
+    if user is None :
         return False
 
-    ROWS = [
-        ("lane", "swimmer", "country", "time"),
-        (4  , "Joseph Schooling", Text("Singapore", justify="right"), 50.39),
-        (2  , "Michael Phelps"  , "United States", 51.14),
-        (5  , "Chad le Clos"    , "South Africa", 51.14),
-        (6  , "László Cseh"     , "Hungary", 51.14),
-        (3  , "Li Zhuhao"       , "China", 51.26),
-        (8  , "Mehdy Metella"   , "France", 51.58),
-        (7  , "Tom Shields"      , "United States", 51.73),
-        (1  , "Aleksandr Sadovnikov", "Russia", 51.84),
-        (10 , "Darren Burns", "Scotland", 51.84),
-    ]
+    print(list(user.scrobbles()))
 
-    class TableApp(App):
-        BINDINGS = [
-            Binding("ctrl+q", "quit", "Quit", show=True, priority=True)
-        ]
+    # ROWS = [
+    #     ("lane", "swimmer", "country", "time"),
+    #     (4  , "Joseph Schooling", "Singapore", 50.39),
+    #     (2  , "Michael Phelps"  , "United States", 51.14),
+    #     (5  , "Chad le Clos"    , "South Africa", 51.14),
+    #     (6  , "László Cseh"     , "Hungary", 51.14),
+    #     (3  , "Li Zhuhao"       , "China", 51.26),
+    #     (8  , "Mehdy Metella"   , "France", 51.58),
+    #     (7  , "Tom Shields"      , "United States", 51.73),
+    #     (1  , "Aleksandr Sadovnikov", "Russia", 51.84),
+    #     (10 , "Darren Burns", "Scotland", 51.84),
+    # ]
 
-        CSS = """
-    Screen {
-        align: center middle;
-    }
+    # class TableApp(App):
+    #     BINDINGS = [
+    #         Binding("ctrl+q", "quit", "Quit", show=True, priority=True)
+    #     ]
 
-    DataTable {
-        width: 100%;
-    }
+    #     CSS = """
+    #     Screen {
+    #         align: center middle;
+    #     }
 
-    """
+    #     DataTable {
+    #         width: 100%;
+    #         height: 40%;
+    #     }
 
-        ENABLE_COMMAND_PALETTE = False
+    #     """
 
-        name = "Scrobble Browser"
+    #     ENABLE_COMMAND_PALETTE = False
 
-        def compose(self) -> ComposeResult:
-            yield Header()
-            yield DataTable()
-            yield Footer()
+    #     name = "Scrobble Browser"
 
-        def on_mount(self) -> None:
-            table = self.query_one(DataTable)
-            table.cursor_type = "row"
-            table.zebra_stripes = True
-            table.add_columns(*ROWS[0])
-            table.add_rows(ROWS[1:])
+    #     def compose(self) -> ComposeResult:
+    #         yield Header()
+    #         yield DataTable()
+    #         yield Footer()
 
-    app = TableApp()
-    app.run()
+    #     def on_mount(self) -> None:
+    #         table = self.query_one(DataTable)
+    #         table.cursor_type = "row"
+    #         table.zebra_stripes = True
+    #         table.add_columns(*ROWS[0])
+    #         table.add_rows(ROWS[1:])
+
+    # app = TableApp()
+    # app.run()
 
     return True
 
