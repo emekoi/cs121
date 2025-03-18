@@ -17,11 +17,11 @@ import mysql.connector.errorcode as errorcode
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Grid, Vertical, Horizontal, Container
+from textual.containers import Container
 from textual.screen import Screen
 from textual.widgets import DataTable, Placeholder, Static
 from textual.widgets import Header, Footer
-from textual.widgets import Label, Button, Input
+from textual.widgets import Button, Input
 
 from rich.status import Status
 
@@ -493,7 +493,7 @@ class StartScreen(Screen):
         if event.button.id == "login":
             self.dismiss(await self.app.push_screen_wait(LoginScreen()))
         else:
-            self.dismiss(await self.app.push_screen(SignupScreen()))
+            self.dismiss(await self.app.push_screen_wait(SignupScreen()))
 
 
 class LoginScreen(Screen):
@@ -566,12 +566,14 @@ class SignupScreen(Screen):
                     )
                     self.app.pop_screen()
                 else:
+                    self.query_one("#username").value = self.username
                     self.query_one("#dialog").loading = False
             except pylast.WSError:
                 await sleep(1)
 
     def compose(self) -> ComposeResult:
         yield Container(
+            Input(id="username", disabled=True),
             Input(placeholder="PASSWORD", id="password", password=True),
             Button("Sign Up"),
             id="dialog",
@@ -584,11 +586,13 @@ class SignupScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         password = self.query_one("#password", Input).value
-        if password != "":
-            mysql_user_create(self.username, self.password, self.session_key)
-            self.dismiss(User(self.username))
-        else:
+        if len(password) == 0:
             self.notify("Invalid password.", severity="error")
+        elif len(password) > 16:
+            self.notify("Password too long.", severity="error")
+        else:
+            mysql_user_create(self.username, password, self.session_key)
+            self.dismiss(User(self.username))
 
 
 class SearchScreen(Screen):
@@ -655,22 +659,17 @@ class Main(App):
 
 # MAIN FUNCTIONS
 # ------------------------------------------------------------------------------
-def menu_sign_up(args: argparse.Namespace) -> None:
-    user = User.create()
-    if user is None:
-        log("Failed to create account.")
-        return None
+# def menu_sign_up(args: argparse.Namespace) -> None:
+#     user = User.create()
+#     if user is None:
+#         log("Failed to create account.")
+#         return None
 
-    log(f"Created user {user.name}")
+#     log(f"Created user {user.name}")
 
-    count = lastfm_user_import(user.lastfm())
-    print(f"Processed {count} scrobbles.")
-    return None
-
-
-def menu_info(args: argparse.Namespace) -> None:
-    Main().run()
-    return None
+#     count = lastfm_user_import(user.lastfm())
+#     print(f"Processed {count} scrobbles.")
+#     return None
 
 
 def migration(args: argparse.Namespace) -> None:
@@ -679,16 +678,12 @@ def migration(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(required=True)
+    parser.set_defaults(func=lambda _: Main().run())
 
-    parser_sign_up = subparsers.add_parser("sign-up")
-    parser_sign_up.set_defaults(func=menu_sign_up)
+    subparsers = parser.add_subparsers(required=False)
 
-    parser_login = subparsers.add_parser("info")
-    parser_login.set_defaults(func=menu_info)
-
-    # parser_login = subparsers.add_parser("migration")
-    # parser_login.set_defaults(func=migration)
+    parser_login = subparsers.add_parser("migration")
+    parser_login.set_defaults(func=migration)
 
     args = parser.parse_args()
     args.func(args)

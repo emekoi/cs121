@@ -17,10 +17,10 @@ DROP DATABASE IF EXISTS ${DATABASE_NAME};
 CREATE DATABASE ${DATABASE_NAME};
 USE ${DATABASE_NAME};
 SOURCE sql/setup.sql;
+SOURCE sql/setup-views.sql;
 SOURCE sql/setup-routines.sql;
 SOURCE sql/setup-passwords.sql;
 EOF
-    python app.py sign-up
     ;;
 backup)
     mkdir -p backup

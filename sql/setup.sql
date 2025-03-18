@@ -91,7 +91,7 @@ CREATE TABLE tracks
 -- A table of all known users
 CREATE TABLE users
     -- INFO: An unique identifier of users.
-  ( user_name        VARCHAR(16) NOT NULL
+  ( user_name        VARCHAR(64) NOT NULL
     -- INFO: The salt used to hash a user's password.
   , user_salt        CHAR(8)     NOT NULL
     -- INFO: The salted hash of the user's password.
