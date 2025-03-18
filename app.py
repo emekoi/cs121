@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio import sleep
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -16,19 +17,22 @@ import mysql.connector.errorcode as errorcode
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Grid, Vertical, Horizontal
+from textual.containers import Grid, Vertical, Horizontal, Container
 from textual.screen import Screen
 from textual.widgets import DataTable, Placeholder, Static
 from textual.widgets import Header, Footer
 from textual.widgets import Label, Button, Input
 
-import pylast
-import pyparsing as pp
+from rich.status import Status
 
 import rich.console
 import rich.progress
 import rich.prompt
 import rich.text
+
+import pylast
+import pyparsing as pp
+
 
 # GLOBAL VARIABLES
 # ------------------------------------------------------------------------------
@@ -180,26 +184,6 @@ def lastfm_network() -> pylast.LastFMNetwork:
     if __lastfm_network is None:
         raise LastFMError
     return __lastfm_network
-
-
-def lastfm_user_auth(retry_count: int, cb, err) -> tuple[str, str] | None:
-    skg = pylast.SessionKeyGenerator(lastfm_network())
-    url = skg.get_web_auth_url()
-
-    webbrowser.open(url)
-
-    with __console.status("Authorizing application..."):
-        while retry_count > 0:
-            retry_count -= 1
-
-            try:
-                return skg.get_web_auth_session_key_username(url)
-            except pylast.WSError:
-                # sleep to prevent hitting rate limits
-                time.sleep(1)
-
-    log("Unable to authorize application.")
-    return None
 
 
 def lastfm_user_import(user: pylast.User) -> int | None:
@@ -429,13 +413,7 @@ class User:
     admin: bool = False
 
     @classmethod
-    def create(cls: any, retry_count: int = 5) -> Self | None:
-        result = lastfm_user_auth(retry_count)
-        if result is None:
-            return None
-
-        session_key, username = result
-
+    def create(cls: any, session_key: str, username: str) -> Self | None:
         if mysql_user_exists(username):
             mysql_user_update_session_key(username, session_key)
             log(f"User '{username}' already exists")
@@ -510,8 +488,12 @@ class StartScreen(Screen):
         yield Button("Sign Up", id="sign-up")
         yield Button("Login", id="login")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id)
+    @work
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "login":
+            self.dismiss(await self.app.push_screen_wait(LoginScreen()))
+        else:
+            self.dismiss(await self.app.push_screen(SignupScreen()))
 
 
 class LoginScreen(Screen):
@@ -525,6 +507,10 @@ class LoginScreen(Screen):
     }
     """
 
+    BINDINGS = [
+        ("escape", "app.pop_screen", "Back"),
+    ]
+
     def compose(self) -> ComposeResult:
         yield Input(placeholder="USERNAME", id="username")
         yield Input(placeholder="PASSWORD", id="password", password=True)
@@ -534,16 +520,12 @@ class LoginScreen(Screen):
         username = self.query_one("#username", Input).value
         password = self.query_one("#password", Input).value
         if username != "" and password != "":
-            user = User.login(username, password)
-
-            if user is None:
+            if user := User.login(username, password):
+                # count = lastfm_user_import(user.lastfm())
+                # print(f"Processed {count} scrobbles.")
+                self.dismiss(user)
+            else:
                 self.notify("Invalid username or password.", severity="error")
-                return None
-
-            # count = lastfm_user_import(user.lastfm())
-            # print(f"Processed {count} scrobbles.")
-
-            self.dismiss(user)
         else:
             self.notify("Invalid username or password.", severity="error")
 
@@ -554,32 +536,75 @@ class SignupScreen(Screen):
         align: center middle;
     }
 
-    * {
+    #dialog {
         width: 50%;
+        height: auto;
+    }
+
+    Button {
+        width: 100%;
     }
     """
 
+    BINDINGS = [
+        ("escape", "app.pop_screen", "Back"),
+    ]
+
+    @work(exclusive=True)
+    async def authenticate(self) -> None:
+        skg = pylast.SessionKeyGenerator(lastfm_network())
+        url = skg.get_web_auth_url()
+        webbrowser.open(url)
+
+        while True:
+            try:
+                self.session_key, self.username = skg.get_web_auth_session_key_username(
+                    url
+                )
+                self.query_one("#dialog").loading = False
+                # self.session_key = session_key
+                # self.username = username
+
+            except pylast.WSError:
+                await sleep(1)
+
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="USERNAME", id="username")
-        yield Input(placeholder="PASSWORD", id="password", password=True)
-        yield Button("Login")
+        yield Container(
+            Input(placeholder="PASSWORD", id="password", password=True),
+            Button("Sign Up"),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        input = self.query_one("#dialog")
+        input.loading = True
+        self.authenticate()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        username = self.query_one("#username", Input).value
         password = self.query_one("#password", Input).value
-        if username != "" and password != "":
-            user = User.login(username, password)
+        if password != "":
+            if mysql_user_exists(self.username):
+                mysql_user_update_session_key(username, session_key)
+                self.notify(f"User '{self.username}' already exists.", severity="error")
 
-            if user is None:
-                self.notify("Invalid username or password.", severity="error")
-                return None
+            # print(f"Username: {username}")
+            # password = rich.prompt.Prompt.ask("Password", password=True)
 
-            # count = lastfm_user_import(user.lastfm())
-            # print(f"Processed {count} scrobbles.")
+            # mysql_user_create(username, password, session_key)
 
-            self.dismiss(user)
+            # user = User.login(username, password)
+
+            # if user is None:
+            #     self.notify("Invalid username or password.", severity="error")
+            #     return None
+
+            # # count = lastfm_user_import(user.lastfm())
+            # # print(f"Processed {count} scrobbles.")
+
+            # self.dismiss(user)
+            pass
         else:
-            self.notify("Invalid username or password.", severity="error")
+            self.notify("Invalid password.", severity="error")
 
 
 class SearchScreen(Screen):
@@ -595,12 +620,15 @@ class SearchScreen(Screen):
         yield DataTable(cursor_type="row", zebra_stripes=True)
         yield Footer()
 
+    @work
+    async def load_scrobbles(self, table: DataTable) -> None:
+        for s in self.app.user.scrobbles():
+            table.add_row(s.time, rich.text.Text(s.track.name), s.track.artist.name)
+
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.add_columns("Date", "Track", "Artist")
-
-        for s in self.app.user.scrobbles():
-            table.add_row(s.time, rich.text.Text(s.track.name), s.track.artist.name)
+        self.load_scrobbles(table)
 
 
 class ReportScreen(Screen):
@@ -637,12 +665,8 @@ class Main(App):
 
     @work
     async def on_mount(self) -> None:
-        cmd = await self.push_screen_wait(StartScreen())
-        if cmd == "login":
-            self.user = await self.push_screen_wait(LoginScreen())
-            self.switch_mode("search")
-        else:
-            self.quit()
+        self.user = await self.push_screen_wait(StartScreen())
+        self.switch_mode("search")
 
 
 # MAIN FUNCTIONS
