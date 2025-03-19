@@ -17,9 +17,10 @@ import mysql.connector.errorcode as errorcode
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Container
-from textual.screen import Screen
+from textual.reactive import reactive
+from textual.screen import Screen, ModalScreen
 from textual.widgets import DataTable, Placeholder, Static, ProgressBar
-from textual.widgets import Header, Footer
+from textual.widgets import Header, Footer, Label
 from textual.widgets import Button, Input
 
 import pylast
@@ -28,8 +29,6 @@ import pyparsing as pp
 
 # GLOBAL VARIABLES
 # ------------------------------------------------------------------------------
-DATABSE_NAME = os.getenv("DATABASE_NAME")
-
 __lastfm_network: pylast.LastFMNetwork = None
 
 
@@ -41,27 +40,6 @@ class LastFMError(Exception):
 
 def log(msg) -> None:
     print(msg, file=sys.stderr)
-
-
-# command query +x:arg1,arg2,arg3
-def parse_user_command(input_str: str) -> any:
-    arg = pp.Word(pp.alphas) | pp.quoted_string.set_parse_action(pp.remove_quotes)
-    flag_name = pp.Regex("\\+(\\w+):", as_group_list=True).set_parse_action(
-        lambda x: x[0][0]
-    )
-    flag_args = pp.delimited_list(arg, ",")
-    flag = pp.Group(flag_name + flag_args).set_parse_action(
-        lambda xs: [{"name": x[0], "args": x[1:]} for x in xs]
-    )
-    command = pp.Word(pp.alphas).set_results_name("command")
-    query = arg.set_results_name("query")
-    flags = pp.ZeroOrMore(flag).set_results_name("flags", list_all_matches=True)
-    parser = command + (query & flags)
-
-    try:
-        return parser.parse_string(input_str).as_dict()
-    except pp.ParseException:
-        return None
 
 
 # MYSQL UTIL FUNCTIONS
@@ -167,7 +145,10 @@ def lastfm_init() -> pylast.LastFMNetwork:
     if API_KEY is None or API_SECRET is None:
         return None
 
-    return pylast.LastFMNetwork(API_KEY, API_SECRET)
+    try:
+        return pylast.LastFMNetwork(API_KEY, API_SECRET)
+    except Exception:
+        return None
 
 
 def lastfm_network() -> pylast.LastFMNetwork:
@@ -176,8 +157,68 @@ def lastfm_network() -> pylast.LastFMNetwork:
     return __lastfm_network
 
 
-# SCHEMA TYPES
+# TYPES
 # ------------------------------------------------------------------------------
+# @dataclass
+# class Filter:
+
+#     @dataclass
+#     class Flag:
+#         name: str
+#         args: list[str]
+
+#     query: str | None
+#     flags: list[Flag]
+
+#     # command query +x:arg1,arg2,arg3
+#     @classmethod
+#     def parse(cls, input_str: str) -> Self:
+#         arg = pp.Word(pp.alphas) | pp.quoted_string.set_parse_action(pp.remove_quotes)
+#         flag_name = pp.Regex("\\+(\\w+):", as_group_list=True).set_parse_action(
+#             lambda x: x[0][0]
+#         )
+#         flag_args = pp.delimited_list(arg, ",")
+#         flag = pp.Group(flag_name + flag_args).set_parse_action(
+#             lambda xs: [Flag(x[0], x[1:]) for x in xs]
+#         )
+#         command = pp.Word(pp.alphas).set_results_name("command")
+#         query = arg.set_results_name("query")
+#         flags = pp.ZeroOrMore(flag).set_results_name("flags", list_all_matches=True)
+#         parser = command + (query & flags)
+
+#         try:
+#             return parser.parse_string(input_str).as_dict()
+#         except pp.ParseException:
+#             return None
+
+
+@dataclass
+class Filter:
+    name: str
+    regex: str
+
+    # +x:arg1,arg2,arg3
+    @classmethod
+    def parse(cls, input_str: str) -> list[Self]:
+        arg = pp.Word(pp.alphas) | pp.quoted_string.set_parse_action(pp.remove_quotes)
+        name = pp.Regex(
+            "\\+(track|album|artist):", as_group_list=True
+        ).set_parse_action(lambda x: x[0][0])
+
+        flag = pp.Group(name + arg).set_parse_action(
+            lambda xs: [cls(x[0].lower(), x[1]) for x in xs]
+        )
+
+        try:
+            return pp.ZeroOrMore(flag).parse_string(input_str)
+        except pp.ParseException:
+            return None
+
+    def to_sql(self) -> str:
+        escaped = mysql_connection._cmysql.escape_string(self.regex)
+        return f"REGEX_LIKE({self.name}_name, '{escaped}')"
+
+
 @dataclass
 class MBEntry:
     name: str
@@ -279,6 +320,12 @@ class User:
         if is_admin is None:
             return None
         else:
+            if is_admin:
+                ADMIN_DATABASE_USER = os.getenv("ADMIN_DATABASE_USER")
+                ADMIN_DATABASE_PASSWORD = os.getenv("ADMIN_DATABASE_PASSWORD")
+                mysql_connection.change_user(
+                    ADMIN_DATABASE_USER, ADMIN_DATABASE_PASSWORD, DATABSE_NAME
+                )
             return cls(username, is_admin)
 
     def lastfm(self: Self) -> pylast.User:
@@ -338,9 +385,11 @@ class StartScreen(Screen):
     @work
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "login":
-            self.dismiss(await self.app.push_screen_wait(LoginScreen()))
+            result = await self.app.push_screen_wait(LoginScreen())
         else:
-            self.dismiss(await self.app.push_screen_wait(SignupScreen()))
+            result = await self.app.push_screen_wait(SignupScreen())
+
+        self.dismiss(result)
 
 
 class LoginScreen(Screen):
@@ -397,26 +446,30 @@ class SignupScreen(Screen):
 
     @work(exclusive=True)
     async def authenticate(self) -> None:
-        skg = pylast.SessionKeyGenerator(lastfm_network())
-        url = skg.get_web_auth_url()
-        webbrowser.open(url)
+        try:
+            skg = pylast.SessionKeyGenerator(lastfm_network())
+            url = skg.get_web_auth_url()
+            webbrowser.open(url)
 
-        while True:
-            try:
-                result = skg.get_web_auth_session_key_username(url)
-                self.session_key, self.username = result
+            while True:
+                try:
+                    result = skg.get_web_auth_session_key_username(url)
+                    self.session_key, self.username = result
 
-                if mysql_user_exists(self.username):
-                    mysql_user_update_session_key(self.username, self.session_key)
-                    self.notify(
-                        f"User '{self.username}' already exists.", severity="error"
-                    )
-                    self.app.pop_screen()
-                else:
-                    self.query_one("#username").value = self.username
-                    self.query_one("#dialog").loading = False
-            except pylast.WSError:
-                await sleep(1)
+                    if mysql_user_exists(self.username):
+                        mysql_user_update_session_key(self.username, self.session_key)
+                        self.notify(
+                            f"User '{self.username}' already exists.", severity="error"
+                        )
+                        self.app.pop_screen()
+                    else:
+                        self.query_one("#username").value = self.username
+                        self.query_one("#dialog").loading = False
+                except pylast.WSError:
+                    await sleep(1)
+        except Exception:
+            self.notify("Unable to reach Last.FM.", severity="error")
+            self.app.pop_screen()
 
     def compose(self) -> ComposeResult:
         yield Container(
@@ -593,7 +646,6 @@ class ImportScreen(Screen):
             pass
 
         finally:
-
             if scrobbles_remaining > 0:
                 progress.advance(advance=scrobbles_remaining)
 
@@ -611,10 +663,11 @@ class ImportScreen(Screen):
     @work
     async def on_mount(self) -> None:
         try:
-            # scrobble_count = self.app.user.lastfm().get_playcount()
-            scrobble_count = 200
+            scrobble_count = self.app.user.lastfm().get_playcount()
+            # scrobble_count = 200
         except pylast.PyLastError:
             self.dismiss()
+            return None
 
         self.query_one(Static).update(
             content=f"Importing 0/{scrobble_count} scrobbles."
@@ -627,6 +680,35 @@ class ImportScreen(Screen):
         self.lastfm_import(scrobble_count)
 
 
+class FilterScreen(ModalScreen):
+    CSS = """
+    FilterScreen {
+        align: center middle;
+    }
+
+    Input {
+        width: 50%;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "app.pop_screen", "Back"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="FILTER", id="filter")
+
+    def on_input_submitted(self, e: Input.Submitted) -> None:
+        if len(e.value) == 0:
+            self.app.filters = []
+            self.dismiss()
+        elif filters := Filter.parse(e.value):
+            self.app.filters = filters
+            self.dismiss()
+        else:
+            self.notify("Invalid filter.")
+
+
 class SearchScreen(Screen):
     CSS = """
     DataTable {
@@ -634,6 +716,8 @@ class SearchScreen(Screen):
         text-overflow: ellipsis;  # Overflowing text is truncated with an ellipsis
     }
     """
+
+    filters = reactive([])
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -648,14 +732,24 @@ class SearchScreen(Screen):
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.add_columns("Date", "Track", "Artist")
+        if len(self.app.filters) != 0:
+            sys.exit(1)
+
         self.load_scrobbles(table)
 
 
 class ReportScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Placeholder("Report Screen")
+        yield Label(f"{str(self.app.filters)}", markup=False)
         yield Footer()
+
+    def on_mount(self) -> None:
+        def on_filter_change() -> None:
+            msg = [x.to_sql() for x in self.app.filters]
+            self.query_one(Static).update(content=str(msg))
+
+        self.watch(self.app, "filters", on_filter_change)
 
 
 class RecommendScreen(Screen):
@@ -671,11 +765,14 @@ class Main(App):
     ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
+        ("f", "app.push_screen('filter')", "Filter"),
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+f", "switch_mode('search')", "Search"),
         ("ctrl+r", "switch_mode('report')", "Report"),
         ("ctrl+t", "switch_mode('recommend')", "Recommend"),
     ]
+
+    SCREENS = {"filter": FilterScreen}
 
     MODES = {
         "search": SearchScreen,
@@ -683,11 +780,16 @@ class Main(App):
         "recommend": RecommendScreen,
     }
 
+    filters = reactive([])
+
     @work
     async def on_mount(self) -> None:
         self.user = await self.push_screen_wait(StartScreen())
-        await self.push_screen_wait(ImportScreen())
+        # await self.push_screen_wait(ImportScreen())
         self.switch_mode("search")
+
+    # def action_get_filter(self) -> None:
+    #     self.push_screen(FilterScreen())
 
 
 # MAIN FUNCTIONS
@@ -710,12 +812,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    DATABSE_NAME = os.getenv("DATABASE_NAME")
+    CLIENT_DATABASE_USER = os.getenv("CLIENT_DATABASE_USER")
+    CLIENT_DATABASE_PASSWORD = os.getenv("CLIENT_DATABASE_PASSWORD")
+
     try:
         mysql_connection = mysql.connector.connect(
             host="localhost",
-            user="root",
+            user=CLIENT_DATABASE_USER,
             port="3306",
-            password="",
+            password=CLIENT_DATABASE_PASSWORD,
             database=DATABSE_NAME,
         )
     except mysql.connector.Error as err:
