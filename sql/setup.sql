@@ -9,7 +9,6 @@ DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tracks;
 DROP TABLE IF EXISTS albums;
 DROP TABLE IF EXISTS artists;
-DROP TABLE IF EXISTS genres;
 DROP TABLE IF EXISTS mbids;
 
 -- A table of all known MBIDs alsongside their name and frecency.
@@ -21,19 +20,6 @@ CREATE TABLE mbids
     -- INFO: The type of the MBID entity.
   , mbid_type ENUM('artist', 'album', 'track') NOT NULL
   , PRIMARY KEY (mbid)
-  )
-;
-
--- A table ascribing genres to MBIDs.
-CREATE TABLE genres
-    -- INFO: 36 character UUID given by MusicBrainz.
-  ( mbid       CHAR(36)
-    -- INFO: A genre as defined by MusicBrainz.
-  , genre_name VARCHAR(32) NOT NULL
-  , PRIMARY KEY (mbid, genre_name)
-  , FOREIGN KEY (mbid)
-      REFERENCES mbids(mbid)
-      ON DELETE CASCADE
   )
 ;
 
