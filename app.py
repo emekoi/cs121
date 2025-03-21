@@ -17,6 +17,7 @@ import mysql.connector.errorcode as errorcode
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Container
+from textual.content import Content
 from textual.reactive import reactive
 from textual.screen import Screen, ModalScreen
 from textual.widgets import DataTable, Placeholder, Static, ProgressBar
@@ -210,13 +211,13 @@ class Filter:
         )
 
         try:
-            return pp.ZeroOrMore(flag).parse_string(input_str)
+            return pp.ZeroOrMore(flag).parse_string(input_str, parse_all=True)
         except pp.ParseException:
             return None
 
     def to_sql(self) -> str:
         escaped = mysql_connection._cmysql.escape_string(self.regex)
-        return f"REGEX_LIKE({self.name}_name, '{escaped}')"
+        return f"{self.name}_name RLIKE '{escaped.decode()}'"
 
 
 @dataclass
@@ -331,10 +332,10 @@ class User:
     def lastfm(self: Self) -> pylast.User:
         return lastfm_network().get_user(self.name)
 
-    def scrobbles(self: Self) -> Generator[Scrobble]:
+    def scrobbles(self: Self, filters: list[Filter]) -> Generator[Scrobble]:
         with mysql_connection.cursor(dictionary=True) as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT track,
                        album,
                        artist,
@@ -347,10 +348,12 @@ class User:
                 FROM display_tracks
                   JOIN scrobbles ON (mbid = track)
                 WHERE user_name = %s
+                  {"\n".join(map(lambda x: "AND " + x.to_sql(), filters))}
                 ORDER BY scrobble_time DESC
                 """,
                 (self.name,),
             )
+
             for row in cursor:
                 artist = Artist(row["artist_name"], row["artist"])
                 if album := row["album"]:
@@ -449,7 +452,7 @@ class SignupScreen(Screen):
         try:
             skg = pylast.SessionKeyGenerator(lastfm_network())
             url = skg.get_web_auth_url()
-            webbrowser.open(url)
+            self.app.open_url(url)
 
             while True:
                 try:
@@ -664,7 +667,7 @@ class ImportScreen(Screen):
     async def on_mount(self) -> None:
         try:
             scrobble_count = self.app.user.lastfm().get_playcount()
-            # scrobble_count = 200
+            scrobble_count = min(500, scrobble_count)
         except pylast.PyLastError:
             self.dismiss()
             return None
@@ -711,31 +714,41 @@ class FilterScreen(ModalScreen):
 
 class SearchScreen(Screen):
     CSS = """
+    #box {
+        width: 100%;
+        height: 100%;
+    }
+
     DataTable {
         width: 100%;
-        text-overflow: ellipsis;  # Overflowing text is truncated with an ellipsis
+        text-overflow: ellipsis;
     }
     """
 
-    filters = reactive([])
-
     def compose(self) -> ComposeResult:
         yield Header()
-        yield DataTable(cursor_type="row", zebra_stripes=True)
+        yield Container(DataTable(cursor_type="row", zebra_stripes=True), id="box")
         yield Footer()
 
     @work
     async def load_scrobbles(self, table: DataTable) -> None:
-        for s in self.app.user.scrobbles():
-            table.add_row(s.time, s.track.name, s.track.artist.name)
+        for s in self.app.user.scrobbles(self.app.filters):
+            track = Content(s.track.name).truncate(48, ellipsis=True)
+            artist = Content(s.track.artist.name).truncate(32, ellipsis=True)
+            table.add_row(s.time, track, artist)
+        self.query_one("#box").loading = False
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.add_columns("Date", "Track", "Artist")
-        if len(self.app.filters) != 0:
-            sys.exit(1)
 
-        self.load_scrobbles(table)
+        def on_filter_change() -> None:
+            self.query_one("#box").loading = True
+            table.clear()
+            self.load_scrobbles(table)
+
+        self.watch(self.app, "filters", on_filter_change)
+        on_filter_change()
 
 
 class ReportScreen(Screen):
@@ -787,9 +800,6 @@ class Main(App):
         self.user = await self.push_screen_wait(StartScreen())
         # await self.push_screen_wait(ImportScreen())
         self.switch_mode("search")
-
-    # def action_get_filter(self) -> None:
-    #     self.push_screen(FilterScreen())
 
 
 # MAIN FUNCTIONS
