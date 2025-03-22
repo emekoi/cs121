@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Self
 
-import argparse
-import webbrowser
 import os
 import sys
 
@@ -20,8 +18,8 @@ from textual.containers import Container
 from textual.content import Content
 from textual.reactive import reactive
 from textual.screen import Screen, ModalScreen
-from textual.widgets import DataTable, Placeholder, Static, ProgressBar
-from textual.widgets import Header, Footer, Label
+from textual.widgets import DataTable, Static, ProgressBar
+from textual.widgets import Header, Footer
 from textual.widgets import Button, Input
 
 import pylast
@@ -31,16 +29,6 @@ import pyparsing as pp
 # GLOBAL VARIABLES
 # ------------------------------------------------------------------------------
 __lastfm_network: pylast.LastFMNetwork = None
-
-
-# GENERAL UTILITIES
-# ------------------------------------------------------------------------------
-class LastFMError(Exception):
-    pass
-
-
-def log(msg) -> None:
-    print(msg, file=sys.stderr)
 
 
 # MYSQL UTIL FUNCTIONS
@@ -154,45 +142,12 @@ def lastfm_init() -> pylast.LastFMNetwork:
 
 def lastfm_network() -> pylast.LastFMNetwork:
     if __lastfm_network is None:
-        raise LastFMError
+        raise pylast.PyLastError
     return __lastfm_network
 
 
 # TYPES
 # ------------------------------------------------------------------------------
-# @dataclass
-# class Filter:
-
-#     @dataclass
-#     class Flag:
-#         name: str
-#         args: list[str]
-
-#     query: str | None
-#     flags: list[Flag]
-
-#     # command query +x:arg1,arg2,arg3
-#     @classmethod
-#     def parse(cls, input_str: str) -> Self:
-#         arg = pp.Word(pp.alphas) | pp.quoted_string.set_parse_action(pp.remove_quotes)
-#         flag_name = pp.Regex("\\+(\\w+):", as_group_list=True).set_parse_action(
-#             lambda x: x[0][0]
-#         )
-#         flag_args = pp.delimited_list(arg, ",")
-#         flag = pp.Group(flag_name + flag_args).set_parse_action(
-#             lambda xs: [Flag(x[0], x[1:]) for x in xs]
-#         )
-#         command = pp.Word(pp.alphas).set_results_name("command")
-#         query = arg.set_results_name("query")
-#         flags = pp.ZeroOrMore(flag).set_results_name("flags", list_all_matches=True)
-#         parser = command + (query & flags)
-
-#         try:
-#             return parser.parse_string(input_str).as_dict()
-#         except pp.ParseException:
-#             return None
-
-
 @dataclass
 class Filter:
     name: str
@@ -224,7 +179,6 @@ class Filter:
 class MBEntry:
     name: str
     mbid: str
-    # genres: Generator[str]
 
 
 @dataclass
@@ -299,12 +253,6 @@ class Track(MBEntry):
 
 
 @dataclass
-class Score:
-    entry: MBEntry
-    score: float
-
-
-@dataclass
 class Scrobble:
     track: Track
     time: datetime
@@ -367,6 +315,40 @@ class User:
                     datetime.fromtimestamp(row["scrobble_time"]),
                 )
 
+    def find_tracks(self: Self, filters: list[Filter]) -> Generator[Scrobble]:
+        with mysql_connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                f"""
+                SELECT track,
+                       album,
+                       artist,
+                       track_name,
+                       album_name,
+                       artist_name,
+                       track_length,
+                       last_access
+                FROM display_tracks
+                  JOIN scores ON (mbid = track)
+                WHERE user_name = %s
+                  {"\n".join(map(lambda x: "AND " + x.to_sql(), filters))}
+                ORDER BY last_crf ASC
+                """,
+                (self.name,),
+            )
+
+            for row in cursor:
+                artist = Artist(row["artist_name"], row["artist"])
+                if album := row["album"]:
+                    album = Album(row["album_name"], row["album"], self)
+                track = Track(
+                    row["track_name"], row["track"], album, artist, row["track_length"]
+                )
+
+                yield Scrobble(
+                    track,
+                    datetime.fromtimestamp(row["last_access"]),
+                )
+
 
 # UI
 # ------------------------------------------------------------------------------
@@ -396,6 +378,8 @@ class StartScreen(Screen):
 
 
 class LoginScreen(Screen):
+    TITLE = "Login"
+
     CSS = """
     LoginScreen {
         align: center middle;
@@ -428,6 +412,8 @@ class LoginScreen(Screen):
 
 
 class SignupScreen(Screen):
+    TITLE = "Sign Up"
+
     CSS = """
     SignupScreen {
         align: center middle;
@@ -499,6 +485,8 @@ class SignupScreen(Screen):
 
 
 class ImportScreen(Screen):
+    TITLE = "Import"
+
     CSS = """
     ImportScreen {
         align: center middle;
@@ -530,6 +518,7 @@ class ImportScreen(Screen):
         last_scrobble = mysql_user_last_update(username)
 
         if prev_scrobble_count >= curr_scrobble_count:
+            self.dismiss()
             return None
 
         scrobbles_remaining = curr_scrobble_count - prev_scrobble_count
@@ -667,8 +656,9 @@ class ImportScreen(Screen):
     async def on_mount(self) -> None:
         try:
             scrobble_count = self.app.user.lastfm().get_playcount()
-            scrobble_count = min(500, scrobble_count)
+            scrobble_count = min(10, scrobble_count)
         except pylast.PyLastError:
+            self.notify("Unable to reach Last.FM.", severity="error")
             self.dismiss()
             return None
 
@@ -684,6 +674,8 @@ class ImportScreen(Screen):
 
 
 class FilterScreen(ModalScreen):
+    TITLE = "Filter"
+
     CSS = """
     FilterScreen {
         align: center middle;
@@ -712,7 +704,35 @@ class FilterScreen(ModalScreen):
             self.notify("Invalid filter.")
 
 
-class SearchScreen(Screen):
+# TODO: Remove
+class InfoScreen(ModalScreen):
+    CSS = """
+    InfoScreen {
+        align: center middle;
+    }
+
+    Input {
+        width: 50%;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "app.pop_screen", "Back"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="FILTER", id="filter")
+
+
+class ClientScreen(Screen):
+    pass
+
+class ViewScreen(ClientScreen):
+    TITLE = "Scrobbles"
+
     CSS = """
     #box {
         width: 100%;
@@ -751,25 +771,114 @@ class SearchScreen(Screen):
         on_filter_change()
 
 
-class ReportScreen(Screen):
+class ReportScreen(ClientScreen):
+    TITLE = "Report"
+
+    CSS = """
+    #box {
+        width: 100%;
+        height: 100%;
+    }
+
+    DataTable {
+        width: 100%;
+        text-overflow: ellipsis;
+    }
+    """
+
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Label(f"{str(self.app.filters)}", markup=False)
+        with Container(id="box"):
+            yield DataTable(cursor_type="row", zebra_stripes=True)
+        yield Footer()
+
+    @work
+    async def load_scrobbles(self, table: DataTable) -> None:
+        for s in self.app.user.scrobbles(self.app.filters):
+            track = Content(s.track.name).truncate(48, ellipsis=True)
+            artist = Content(s.track.artist.name).truncate(32, ellipsis=True)
+            table.add_row(s.time, track, artist)
+        self.query_one("#box").loading = False
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.add_columns("Date", "Track", "Artist")
+
+        def on_filter_change() -> None:
+            self.query_one("#box").loading = True
+            table.clear()
+            self.load_scrobbles(table)
+
+        self.watch(self.app, "filters", on_filter_change)
+        on_filter_change()
+
+
+class FindScreen(ClientScreen):
+    TITLE = "Recommendations"
+
+    CSS = """
+    #box {
+        width: 100%;
+        height: 100%;
+    }
+
+    DataTable {
+        width: 100%;
+        text-overflow: ellipsis;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Container(DataTable(cursor_type="row", zebra_stripes=True), id="box")
+        yield Footer()
+
+    @work
+    async def load_scrobbles(self, table: DataTable) -> None:
+        for s in self.app.user.find_tracks(self.app.filters):
+            track = Content(s.track.name).truncate(48, ellipsis=True)
+            artist = Content(s.track.artist.name).truncate(32, ellipsis=True)
+            table.add_row(s.time, track, artist)
+        self.query_one("#box").loading = False
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.add_columns("Date", "Track", "Artist")
+
+        def on_filter_change() -> None:
+            self.query_one("#box").loading = True
+            table.clear()
+            self.load_scrobbles(table)
+
+        self.watch(self.app, "filters", on_filter_change)
+        on_filter_change()
+
+
+class AdminScreen(Screen):
+    TITLE = "Users"
+
+    CSS = """
+    #box {
+        width: 100%;
+        height: 100%;
+    }
+
+    DataTable {
+        width: 100%;
+        text-overflow: ellipsis;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Container(id="box"):
+            yield DataTable(cursor_type="row", zebra_stripes=True)
         yield Footer()
 
     def on_mount(self) -> None:
-        def on_filter_change() -> None:
-            msg = [x.to_sql() for x in self.app.filters]
-            self.query_one(Static).update(content=str(msg))
-
-        self.watch(self.app, "filters", on_filter_change)
-
-
-class RecommendScreen(Screen):
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Placeholder("Recommendation Screen")
-        yield Footer()
+        table = self.query_one(DataTable)
+        table.add_columns("User", "Admin")
+        # table.add_row(s.time, track, artist)
 
 
 class Main(App):
@@ -778,19 +887,19 @@ class Main(App):
     ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
-        ("f", "app.push_screen('filter')", "Filter"),
         ("ctrl+q", "quit", "Quit"),
-        ("ctrl+f", "switch_mode('search')", "Search"),
+        ("f", "app.push_screen('filter')", "Filter"),
+        ("ctrl+v", "switch_mode('view')", "View"),
         ("ctrl+r", "switch_mode('report')", "Report"),
-        ("ctrl+t", "switch_mode('recommend')", "Recommend"),
+        ("ctrl+f", "switch_mode('find')", "Find"),
     ]
 
     SCREENS = {"filter": FilterScreen}
 
     MODES = {
-        "search": SearchScreen,
+        "view": ViewScreen,
         "report": ReportScreen,
-        "recommend": RecommendScreen,
+        "find": FindScreen,
     }
 
     filters = reactive([])
@@ -798,29 +907,15 @@ class Main(App):
     @work
     async def on_mount(self) -> None:
         self.user = await self.push_screen_wait(StartScreen())
-        # await self.push_screen_wait(ImportScreen())
-        self.switch_mode("search")
+        if self.user.admin:
+            self.push_screen(AdminScreen())
+        else:
+            await self.push_screen_wait(ImportScreen())
+            self.switch_mode("view")
 
 
-# MAIN FUNCTIONS
+# ENTRY POINT
 # ------------------------------------------------------------------------------
-def migration(args: argparse.Namespace) -> None:
-    return None
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.set_defaults(func=lambda _: Main().run())
-
-    subparsers = parser.add_subparsers(required=False)
-
-    parser_login = subparsers.add_parser("migration")
-    parser_login.set_defaults(func=migration)
-
-    args = parser.parse_args()
-    args.func(args)
-
-
 if __name__ == "__main__":
     DATABSE_NAME = os.getenv("DATABASE_NAME")
     CLIENT_DATABASE_USER = os.getenv("CLIENT_DATABASE_USER")
@@ -836,24 +931,25 @@ if __name__ == "__main__":
         )
     except mysql.connector.Error as err:
         if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-            log("Incorrect username or password when connecting to DB")
+            print(
+                "Incorrect username or password when connecting to DB", file=sys.stderr
+            )
         elif err.errno == errorcode.ER_BAD_DB_ERROR:
-            log("Database does not exist")
+            print("Database does not exist", file=sys.stderr)
         else:
-            log(f"Failed to connect to DB: {err}")
+            print(f"Failed to connect to DB: {err}", file=sys.stderr)
 
         sys.exit(1)
 
     __lastfm_network = lastfm_init()
 
     try:
-        main()
-    except KeyboardInterrupt:
-        pass
-    except LastFMError:
-        log("Last.FM support disabled.")
-    except mysql.connector.Error as err:
-        log(f"{err}")
+        Main().run()
+    except Exception:
+        print(
+            "Something unexpected happened. Please contact support",
+            file=sys.stderr,
+        )
 
     mysql_connection.commit()
     mysql_connection.close()
