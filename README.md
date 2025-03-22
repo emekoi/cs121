@@ -18,6 +18,17 @@ DATABASE_NAME=emekafinalprojectdb bash run.sh setup
 DATABASE_NAME=emekafinalprojectdb python app.py
 ```
 
+# Controls
+- <kbd>f</kbd>: apply a filter
+- <kbd>Ctrl+v</kbd>: view all scrobbles
+- <kbd>Ctrl+r</kbd>: get listening report
+- <kbd>Ctrl+f</kbd>: get song recommendations
+
+# Bugs
+
+- setting a filter and switching the modes may cause bad results to be shown.
+  you have to reapply the filter.
+
 # Notes
 - RUN IN FULLSCREEN! textual starts having weird issues if the screen is too
   small.

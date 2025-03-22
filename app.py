@@ -679,34 +679,7 @@ class FilterScreen(ModalScreen):
             self.notify("Invalid filter.")
 
 
-# TODO: Remove
-class InfoScreen(ModalScreen):
-    CSS = """
-    InfoScreen {
-        align: center middle;
-    }
-
-    Input {
-        width: 50%;
-    }
-    """
-
-    BINDINGS = [
-        ("escape", "app.pop_screen", "Back"),
-    ]
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def compose(self) -> ComposeResult:
-        yield Input(placeholder="FILTER", id="filter")
-
-
-class ClientScreen(Screen):
-    pass
-
-
-class ViewScreen(ClientScreen):
+class ViewScreen(Screen):
     TITLE = "Scrobbles"
 
     CSS = """
@@ -747,7 +720,7 @@ class ViewScreen(ClientScreen):
         on_filter_change()
 
 
-class ReportScreen(ClientScreen):
+class ReportScreen(Screen):
     TITLE = "Report"
 
     CSS = """
@@ -764,8 +737,7 @@ class ReportScreen(ClientScreen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Container(id="box"):
-            yield DataTable(cursor_type="row", zebra_stripes=True)
+        yield Container(DataTable(cursor_type="row", zebra_stripes=True), id="box")
         yield Footer()
 
     @work
@@ -789,7 +761,7 @@ class ReportScreen(ClientScreen):
         on_filter_change()
 
 
-class FindScreen(ClientScreen):
+class FindScreen(Screen):
     TITLE = "Recommendations"
 
     CSS = """
@@ -853,19 +825,23 @@ class AdminScreen(Screen):
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
-        table.add_columns("User", "Admin")
+        table.add_columns("User", "Admin", "Scrobbles")
 
         with mysql_connection.cursor(dictionary=True) as cursor:
             cursor.execute(
                 """
                 SELECT user_name,
-                       IF(user_admin, 'Admin', 'Client') AS user_status
-                FROM users
+                       IF(user_admin, 'Admin', 'Client') AS user_status,
+                       COUNT(mbid) as user_scrobbles
+                FROM users LEFT JOIN scrobbles USING (user_name)
+                GROUP BY user_name
                 """
             )
 
             for row in cursor:
-                table.add_row(row["user_name"], row["user_status"])
+                table.add_row(
+                    row["user_name"], row["user_status"], row["user_scrobbles"]
+                )
 
 
 class Main(App):
