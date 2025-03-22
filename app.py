@@ -191,66 +191,12 @@ class MBEntry:
 
 @dataclass
 class Artist(MBEntry):
-    def albums(self: Self) -> Generator[Album]:
-        with mysql_connection.cursor(dictionary=True) as cursor:
-            cursor.execute(
-                """
-                SELECT album,
-                       album_name,
-                FROM display_albums
-                WHERE artist = %s
-                """,
-                (self.mbid,),
-            )
-            for row in cursor:
-                yield Album(row["album_name"], row["album"], self)
-
-    def tracks(self: Self) -> Generator[Track]:
-        with mysql_connection.cursor(dictionary=True) as cursor:
-            cursor.execute(
-                """
-                SELECT track,
-                       album,
-                       track_name,
-                       album_name,
-                       track_length
-                FROM display_tracks
-                WHERE artist = %s
-                """,
-                (self.mbid,),
-            )
-            for row in cursor:
-                if album := row["album"]:
-                    album = Album(row["album_name"], row["album"], self)
-                yield Track(
-                    row["track_name"], row["track"], album, self, row["track_length"]
-                )
+    pass
 
 
 @dataclass
 class Album(MBEntry):
     artist: Artist
-
-    def tracks(self: Self) -> Generator[Track]:
-        with mysql_connection.cursor(dictionary=True) as cursor:
-            cursor.execute(
-                """
-                SELECT track,
-                       track_name,
-                       track_length
-                FROM display_tracks
-                WHERE album = %s
-                """,
-                (self.mbid,),
-            )
-            for row in cursor:
-                yield Track(
-                    row["track_name"],
-                    row["track"],
-                    self,
-                    self.artist,
-                    row["track_length"],
-                )
 
 
 @dataclass
@@ -320,6 +266,38 @@ class User:
                     track,
                     datetime.fromtimestamp(row["scrobble_time"]),
                 )
+
+    def report(self: Self, filters: list[Filter]) -> Generator[Scrobble]:
+        with mysql_connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                f"""
+                SELECT track,
+                       album,
+                       artist,
+                       track_name,
+                       album_name,
+                       artist_name,
+                       track_length,
+                       COUNT(*) AS scrobble_count
+                FROM display_tracks
+                  JOIN scrobbles ON (mbid = track)
+                WHERE user_name = %s
+                  {"\n".join(map(lambda x: "AND " + x.to_sql(), filters))}
+                GROUP BY mbid
+                ORDER BY scrobble_count DESC;
+                """,
+                (self.name,),
+            )
+
+            for row in cursor:
+                artist = Artist(row["artist_name"], row["artist"])
+                if album := row["album"]:
+                    album = Album(row["album_name"], row["album"], self)
+                track = Track(
+                    row["track_name"], row["track"], album, artist, row["track_length"]
+                )
+
+                yield track, row["scrobble_count"]
 
     def find_tracks(self: Self, filters: list[Filter]) -> Generator[Scrobble]:
         with mysql_connection.cursor(dictionary=True) as cursor:
@@ -792,15 +770,15 @@ class ReportScreen(ClientScreen):
 
     @work
     async def load_scrobbles(self, table: DataTable) -> None:
-        for s in self.app.user.scrobbles(self.app.filters):
-            track = Content(s.track.name).truncate(48, ellipsis=True)
-            artist = Content(s.track.artist.name).truncate(32, ellipsis=True)
-            table.add_row(s.time, track, artist)
+        for track, count in self.app.user.report(self.app.filters):
+            t = Content(track.name).truncate(48, ellipsis=True)
+            a = Content(track.artist.name).truncate(32, ellipsis=True)
+            table.add_row(count, t, a)
         self.query_one("#box").loading = False
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
-        table.add_columns("Date", "Track", "Artist")
+        table.add_columns("Scrobble Count", "Track", "Artist")
 
         def on_filter_change() -> None:
             self.query_one("#box").loading = True

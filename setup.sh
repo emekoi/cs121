@@ -28,6 +28,7 @@ CALL sp_user_create_client('dummy3', 'dummy3', NULL);
 
 SOURCE sql/load-data.sql;
 SOURCE sql/grant-permissions.sql;
+SHOW WARNINGS;
 EOF
     ;;
 
@@ -36,16 +37,6 @@ backup)
     suffix="$(date '+%Y%m%d-%H%M%S' | tr -d '\n')"
     mysqldump -u root --databases "${DATABASE_NAME}" >"backup/backup-${suffix}.sql"
     cp "backup/backup-${suffix}.sql" "sql/load-data.sql"
-    ;;
-run)
-    # export CLIENT_DATABASE_USER="root"
-    # export CLIENT_DATABASE_PASSWORD=""
-
-    # export ADMIN_DATABASE_USER="root"
-    # export ADMIN_DATABASE_PASSWORD=""
-
-    # source .venv/bin/activate
-    python3 app.py
     ;;
 *) ;;
 esac

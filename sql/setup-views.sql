@@ -26,5 +26,5 @@ CREATE VIEW display_tracks AS
          length AS track_length
   FROM tracks
     NATURAL JOIN mbids
-    INNER JOIN display_artists USING (artist)
-    LEFT JOIN display_albums USING (album);
+    LEFT JOIN display_albums USING (album, artist)
+    INNER JOIN display_artists USING (artist);

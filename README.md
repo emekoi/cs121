@@ -24,6 +24,11 @@ DATABASE_NAME=emekafinalprojectdb python app.py
   
 - this may or may not work in Windows. i haven't checked.
 
+- you can press <kbd>f</kbd> to filter by track/artist/album name. the syntax is
+  `+(track|artist|album):(<regex>|'<regex>'|"<regex>")`. the quotes can be left
+  off if the regex pattern only consists of alphanumeric characters with no
+  spaces. some good queries to try are "+album:world" or "+artist:kenny".
+
 - there are 5 accounts:
   | Username | Password  | Type   |
   |----------|-----------|--------|
