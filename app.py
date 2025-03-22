@@ -28,7 +28,15 @@ import pyparsing as pp
 
 # GLOBAL VARIABLES
 # ------------------------------------------------------------------------------
-__lastfm_network: pylast.LastFMNetwork = None
+LASTFM_NETWORK = None
+
+DATABSE_NAME = os.getenv("DATABASE_NAME")
+
+CLIENT_DATABASE_USER = "client"
+CLIENT_DATABASE_PASSWORD = "client"
+
+ADMIN_DATABASE_USER = "admin"
+ADMIN_DATABASE_PASSWORD = "admin"
 
 
 # MYSQL UTIL FUNCTIONS
@@ -141,9 +149,9 @@ def lastfm_init() -> pylast.LastFMNetwork:
 
 
 def lastfm_network() -> pylast.LastFMNetwork:
-    if __lastfm_network is None:
+    if LASTFM_NETWORK is None:
         raise pylast.PyLastError
-    return __lastfm_network
+    return LASTFM_NETWORK
 
 
 # TYPES
@@ -270,8 +278,6 @@ class User:
             return None
         else:
             if is_admin:
-                ADMIN_DATABASE_USER = os.getenv("ADMIN_DATABASE_USER")
-                ADMIN_DATABASE_PASSWORD = os.getenv("ADMIN_DATABASE_PASSWORD")
                 mysql_connection.cmd_change_user(
                     ADMIN_DATABASE_USER, ADMIN_DATABASE_PASSWORD, DATABSE_NAME
                 )
@@ -648,7 +654,6 @@ class ImportScreen(Screen):
     async def on_mount(self) -> None:
         try:
             scrobble_count = self.app.user.lastfm().get_playcount()
-            # scrobble_count = min(10, scrobble_count)
         except pylast.PyLastError:
             self.notify("Unable to reach Last.FM.", severity="error")
             self.dismiss()
@@ -874,7 +879,7 @@ class AdminScreen(Screen):
 
         with mysql_connection.cursor(dictionary=True) as cursor:
             cursor.execute(
-                f"""
+                """
                 SELECT user_name,
                        IF(user_admin, 'Admin', 'Client') AS user_status
                 FROM users
@@ -930,10 +935,6 @@ class Main(App):
 # ENTRY POINT
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    DATABSE_NAME = os.getenv("DATABASE_NAME")
-    CLIENT_DATABASE_USER = os.getenv("CLIENT_DATABASE_USER")
-    CLIENT_DATABASE_PASSWORD = os.getenv("CLIENT_DATABASE_PASSWORD")
-
     try:
         mysql_connection = mysql.connector.connect(
             host="localhost",
@@ -954,7 +955,7 @@ if __name__ == "__main__":
 
         sys.exit(1)
 
-    __lastfm_network = lastfm_init()
+    LASTFM_NETWORK = lastfm_init()
 
     try:
         Main().run()

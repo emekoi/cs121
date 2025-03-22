@@ -1,7 +1,5 @@
 #!/usr/bin/bash
 
-# export DATABASE_NAME=emekafinalprojectdb
-
 if [ $# -eq 0 ]; then
     cat <<EOF
 ${0}
@@ -26,7 +24,7 @@ SOURCE sql/setup-passwords.sql;
 CALL sp_user_create_admin('admin', 'admin');
 CALL sp_user_create_client('dummy1', 'dummy1', NULL);
 CALL sp_user_create_client('dummy2', 'dummy2', NULL);
-CALL sp_user_create_client('dummy4', 'dummy3', NULL);
+CALL sp_user_create_client('dummy3', 'dummy3', NULL);
 
 SOURCE sql/load-data.sql;
 SOURCE sql/grant-permissions.sql;
