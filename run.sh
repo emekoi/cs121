@@ -29,6 +29,7 @@ CALL sp_user_create_client('dummy2', 'dummy2', NULL);
 CALL sp_user_create_client('dummy4', 'dummy3', NULL);
 
 SOURCE sql/load-data.sql;
+SOURCE sql/grant-permissions.sql;
 EOF
     ;;
 
@@ -36,6 +37,7 @@ backup)
     mkdir -p backup
     suffix="$(date '+%Y%m%d-%H%M%S' | tr -d '\n')"
     mysqldump -u root --databases "${DATABASE_NAME}" >"backup/backup-${suffix}.sql"
+    cp "backup/backup-${suffix}.sql" "sql/load-data.sql"
     ;;
 run)
     # export CLIENT_DATABASE_USER="root"

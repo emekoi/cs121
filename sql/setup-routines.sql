@@ -85,6 +85,10 @@ BEGIN
     , track_mbid
     , user_name
     );
+
+  UPDATE users
+    SET user_last_update = GREATEST(user_last_update, scrobble_time)
+  WHERE users.user_name = user_name;
 END !
 DELIMITER ;
 

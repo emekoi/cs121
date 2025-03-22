@@ -642,15 +642,6 @@ class ImportScreen(Screen):
             if scrobbles_remaining > 0:
                 progress.advance(advance=scrobbles_remaining)
 
-            with mysql_connection.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE users\n"
-                    "SET user_last_update = GREATEST(user_last_update, %s)\n"
-                    "WHERE users.user_name = %s",
-                    (last_scrobble, username),
-                )
-
-            mysql_connection.commit()
             self.dismiss()
 
     @work
