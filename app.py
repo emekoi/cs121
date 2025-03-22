@@ -272,7 +272,7 @@ class User:
             if is_admin:
                 ADMIN_DATABASE_USER = os.getenv("ADMIN_DATABASE_USER")
                 ADMIN_DATABASE_PASSWORD = os.getenv("ADMIN_DATABASE_PASSWORD")
-                mysql_connection.change_user(
+                mysql_connection.cmd_change_user(
                     ADMIN_DATABASE_USER, ADMIN_DATABASE_PASSWORD, DATABSE_NAME
                 )
             return cls(username, is_admin)
@@ -730,6 +730,7 @@ class InfoScreen(ModalScreen):
 class ClientScreen(Screen):
     pass
 
+
 class ViewScreen(ClientScreen):
     TITLE = "Scrobbles"
 
@@ -878,7 +879,18 @@ class AdminScreen(Screen):
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.add_columns("User", "Admin")
-        # table.add_row(s.time, track, artist)
+
+        with mysql_connection.cursor(dictionary=True) as cursor:
+            cursor.execute(
+                f"""
+                SELECT user_name,
+                       IF(user_admin, 'Admin', 'Client') AS user_status
+                FROM users
+                """
+            )
+
+            for row in cursor:
+                table.add_row(row["user_name"], row["user_status"])
 
 
 class Main(App):
@@ -888,11 +900,16 @@ class Main(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
+    ]
+
+    CLIENT_BINDINGS = [
         ("f", "app.push_screen('filter')", "Filter"),
         ("ctrl+v", "switch_mode('view')", "View"),
         ("ctrl+r", "switch_mode('report')", "Report"),
         ("ctrl+f", "switch_mode('find')", "Find"),
     ]
+
+    ADMIN_BINDINGS = []
 
     SCREENS = {"filter": FilterScreen}
 
@@ -908,9 +925,13 @@ class Main(App):
     async def on_mount(self) -> None:
         self.user = await self.push_screen_wait(StartScreen())
         if self.user.admin:
+            for k, a, d in self.CLIENT_BINDINGS:
+                self.bind(k, a, description=d)
             self.push_screen(AdminScreen())
         else:
             await self.push_screen_wait(ImportScreen())
+            for k, a, d in self.CLIENT_BINDINGS:
+                self.bind(k, a, description=d)
             self.switch_mode("view")
 
 

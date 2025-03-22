@@ -139,3 +139,5 @@ CREATE TABLE scrobbles
       ON DELETE CASCADE
   )
 ;
+
+-- TODO: CREATE INDEX

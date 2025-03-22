@@ -3,7 +3,8 @@ DROP FUNCTION IF EXISTS sf_password_hash;
 DROP FUNCTION IF EXISTS sf_user_exists;
 DROP FUNCTION IF EXISTS sf_user_authenticate;
 
-DROP PROCEDURE IF EXISTS sp_user_create;
+DROP PROCEDURE IF EXISTS sp_user_create_client;
+DROP PROCEDURE IF EXISTS sp_user_create_admin;
 DROP PROCEDURE IF EXISTS sp_user_change_password;
 DROP PROCEDURE IF EXISTS sp_user_update_session_key;
 
@@ -40,7 +41,7 @@ DELIMITER ;
 
 -- TODO: documentation
 DELIMITER !
-CREATE PROCEDURE sp_user_create
+CREATE PROCEDURE sp_user_create_client
   ( username VARCHAR(16)
   , password VARCHAR(20)
   , session_key BINARY(32)
@@ -55,6 +56,26 @@ BEGIN
     , FALSE
     , session_key
     , 0
+    );
+END !
+DELIMITER ;
+
+-- TODO: documentation
+DELIMITER !
+CREATE PROCEDURE sp_user_create_admin
+  ( username VARCHAR(16)
+  , password VARCHAR(20)
+  )
+BEGIN
+  DECLARE salt CHAR(8) DEFAULT sf_salt_create(8);
+  INSERT INTO users
+  VALUES
+    ( username
+    , salt
+    , sf_password_hash(salt, password)
+    , TRUE
+    , NULL
+    , NULL
     );
 END !
 DELIMITER ;
