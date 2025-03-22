@@ -70,7 +70,7 @@ def mysql_user_scrobble_count(username: str) -> int:
 def mysql_user_create(username: str, password: str, session_key: str) -> None:
     with mysql_connection.cursor() as cursor:
         cursor.execute(
-            "CALL sp_user_create(%s, %s, %s)", (username, password, session_key)
+            "CALL sp_user_create_client(%s, %s, %s)", (username, password, session_key)
         )
         mysql_connection.commit()
     mysql_connection.commit()
@@ -481,6 +481,7 @@ class SignupScreen(Screen):
             self.notify("Password too long.", severity="error")
         else:
             mysql_user_create(self.username, password, self.session_key)
+            self.notify(f"Created user '{self.username}'.")
             self.dismiss(User(self.username))
 
 
@@ -656,7 +657,7 @@ class ImportScreen(Screen):
     async def on_mount(self) -> None:
         try:
             scrobble_count = self.app.user.lastfm().get_playcount()
-            scrobble_count = min(10, scrobble_count)
+            # scrobble_count = min(10, scrobble_count)
         except pylast.PyLastError:
             self.notify("Unable to reach Last.FM.", severity="error")
             self.dismiss()
