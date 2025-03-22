@@ -8,7 +8,7 @@ DROP PROCEDURE IF EXISTS sp_track_add;
 DROP PROCEDURE IF EXISTS sp_user_add_scrobble;
 DROP PROCEDURE IF EXISTS sp_score_update;
 
--- TODO: documentation
+-- add an mbid and name to the table of mbids.
 DELIMITER !
 CREATE PROCEDURE sp_mbid_add
   ( mbid      CHAR(36)
@@ -22,7 +22,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- add artist to the artist and mbid tables.
 DELIMITER !
 CREATE PROCEDURE sp_artist_add
   ( artist_mbid CHAR(36)
@@ -36,7 +36,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- add album to the album and mbid tables.
 DELIMITER !
 CREATE PROCEDURE sp_album_add
   ( album_mbid   CHAR(36)
@@ -50,7 +50,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- add track to the track and mbid tables.
 DELIMITER !
 CREATE PROCEDURE sp_track_add
   ( track_mbid   CHAR(36)
@@ -69,7 +69,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- add a track scrobble to the user's list of scrobbles
 DELIMITER !
 CREATE PROCEDURE sp_user_add_scrobble
   ( user_name     VARCHAR(16)
@@ -77,7 +77,6 @@ CREATE PROCEDURE sp_user_add_scrobble
   , track_mbid    CHAR(36)
   )
 BEGIN
-  -- TODO: update scores
   INSERT INTO scrobbles
   VALUES
     ( DEFAULT
@@ -92,15 +91,17 @@ BEGIN
 END !
 DELIMITER ;
 
+-- the CRF decay function
 DELIMITER !
 CREATE FUNCTION sf_score_F(delta INT)
 RETURNS DOUBLE
 BEGIN
-  -- HALF_LIFE = 1 / (60 * 60 * 24 * 30)
+  -- HALF_LIFE = 1 / (60 * 60 * 24 * 30) = 1 / 30 days
   RETURN POW(0.5, delta / (60 * 60 * 24 * 30));
 END !
 DELIMITER ;
 
+-- calculate the new CRF score of an MBID
 DELIMITER !
 CREATE FUNCTION sf_score_C
   ( t_delta DOUBLE
@@ -112,7 +113,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- initialize or update a CRF score
 DELIMITER !
 CREATE PROCEDURE sp_score_update
   ( user_name   VARCHAR(16)

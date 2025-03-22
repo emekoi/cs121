@@ -30,7 +30,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- salt and hash a password
 DELIMITER !
 CREATE FUNCTION sf_password_hash(salt CHAR(8), password VARCHAR(20))
 RETURNS BINARY(64) NOT DETERMINISTIC
@@ -39,7 +39,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- create a user with only client permissions
 DELIMITER !
 CREATE PROCEDURE sp_user_create_client
   ( username VARCHAR(16)
@@ -60,7 +60,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- create a user with admin permissions
 DELIMITER !
 CREATE PROCEDURE sp_user_create_admin
   ( username VARCHAR(16)
@@ -80,7 +80,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- check if a username is currently taken
 DELIMITER !
 CREATE FUNCTION sf_user_exists(username VARCHAR(16))
 RETURNS TINYINT DETERMINISTIC
@@ -89,7 +89,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- attempt to authenticate a user and return their admin status
 DELIMITER !
 CREATE FUNCTION sf_user_authenticate(username VARCHAR(16), password VARCHAR(20))
 RETURNS TINYINT DETERMINISTIC
@@ -101,7 +101,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- change a user's password
 DELIMITER !
 CREATE PROCEDURE sp_user_change_password
   ( username VARCHAR(16)
@@ -116,7 +116,7 @@ BEGIN
 END !
 DELIMITER ;
 
--- TODO: documentation
+-- update a user's session key
 DELIMITER !
 CREATE PROCEDURE sp_user_update_session_key
   ( username VARCHAR(16)

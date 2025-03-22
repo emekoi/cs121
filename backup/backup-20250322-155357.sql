@@ -21556,7 +21556,6 @@ CREATE TABLE `scrobbles` (
   PRIMARY KEY (`scrobble_id`),
   KEY `mbid` (`mbid`),
   KEY `user_name` (`user_name`),
-  KEY `idx_mbid` (`mbid`),
   CONSTRAINT `scrobbles_ibfk_1` FOREIGN KEY (`mbid`) REFERENCES `tracks` (`mbid`) ON DELETE CASCADE,
   CONSTRAINT `scrobbles_ibfk_2` FOREIGN KEY (`user_name`) REFERENCES `users` (`user_name`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=23476 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -49910,4 +49909,4 @@ USE `emekafinalprojectdb`;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2025-03-22 14:44:46
+-- Dump completed on 2025-03-22 15:53:57
